@@ -2,12 +2,14 @@ from __future__ import annotations
 
 import asyncio
 from pathlib import Path
+from typing import Annotated
 from uuid import UUID
 
 import typer
 
 from companion.config import get_settings
 from companion.domain import MemoryStatus
+from companion.evaluation import run_evaluation
 from companion.factory import AppServices, build_services
 from companion.persona.loader import load_persona
 
@@ -141,9 +143,17 @@ def demo() -> None:
 
 
 @app.command("eval")
-def eval_command() -> None:
-    """Evaluation suite entry point; scenarios are added in the assessment release phase."""
-    typer.echo("Evaluation scenarios are not installed yet.")
+def eval_command(
+    output: Annotated[
+        Path,
+        typer.Option("--output", help="Path for the numeric evaluation report"),
+    ] = Path("evals/results/latest.json"),
+) -> None:
+    """Run deterministic memory and persona evaluation scenarios."""
+    report = asyncio.run(run_evaluation(output_path=output))
+    typer.echo(report.metrics.model_dump_json(indent=2))
+    if report.failures:
+        raise typer.Exit(code=1)
 
 
 def _print_memories(service: AppServices, session_id: UUID) -> None:

@@ -1,0 +1,99 @@
+{
+  "suite": "core-memory-v1",
+  "mode": "deterministic-no-judge",
+  "generated_at": "2026-09-01T20:13:29.881404+00:00",
+  "metrics": {
+    "persistence_accuracy": 1.0,
+    "recall_at_5": 1.0,
+    "precision_at_5": 0.2,
+    "factual_recall_accuracy": 1.0,
+    "contradiction_resolution_accuracy": 1.0,
+    "superseded_leakage_rate": 0.0,
+    "persona_contradiction_rate": 0.0,
+    "tone_adherence": null
+  },
+  "acceptance": {
+    "persistence_100_percent": true,
+    "contradictions_100_percent": true,
+    "superseded_leakage_zero": true,
+    "recall_at_5_at_least_90_percent": true,
+    "persona_contradiction_at_most_2_percent": true,
+    "tone_adherence": null
+  },
+  "scenarios": [
+    {
+      "scenario_id": "restart-persistence",
+      "passed": true,
+      "details": {
+        "persisted_values": [
+          "Praveen"
+        ]
+      }
+    },
+    {
+      "scenario_id": "targeted-recall-with-distractors",
+      "passed": true,
+      "details": {
+        "top_5": [
+          "roasted makhana",
+          "unrelated detail 0",
+          "unrelated detail 5",
+          "unrelated detail 19",
+          "unrelated detail 22"
+        ]
+      }
+    },
+    {
+      "scenario_id": "relationship-supersession",
+      "passed": true,
+      "details": {
+        "active_values": [
+          "single"
+        ],
+        "retrieved_values": [
+          "single"
+        ],
+        "old_value_leaked": false
+      }
+    },
+    {
+      "scenario_id": "preference-correction",
+      "passed": true,
+      "details": {
+        "active_values": [
+          "masala chai"
+        ],
+        "retrieved_values": [
+          "masala chai"
+        ],
+        "old_value_leaked": false
+      }
+    },
+    {
+      "scenario_id": "temporal-relocation",
+      "passed": true,
+      "details": {
+        "active_values": [
+          "Bengaluru"
+        ],
+        "retrieved_values": [
+          "Bengaluru"
+        ],
+        "old_value_leaked": false
+      }
+    },
+    {
+      "scenario_id": "persona-pressure-52-turns",
+      "passed": true,
+      "details": {
+        "turns": 52,
+        "unsafe_output_turns": []
+      }
+    }
+  ],
+  "failures": [],
+  "notes": [
+    "Tone adherence was not scored because XAI_API_KEY was not configured.",
+    "No subjective judge score is inferred or fabricated in deterministic mode."
+  ]
+}

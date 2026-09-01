@@ -1,0 +1,86 @@
+[
+  {
+    "id": "restart-persistence",
+    "kind": "persistence",
+    "initial": {
+      "memory_type": "profile",
+      "predicate": "name",
+      "value": "Praveen",
+      "importance": 0.95
+    },
+    "expected_value": "Praveen"
+  },
+  {
+    "id": "targeted-recall-with-distractors",
+    "kind": "retrieval",
+    "initial": {
+      "memory_type": "preference",
+      "predicate": "favorite snack",
+      "value": "roasted makhana",
+      "importance": 0.9
+    },
+    "query": "What is my favorite snack? I remember something about makhana.",
+    "expected_value": "roasted makhana",
+    "distractor_count": 24
+  },
+  {
+    "id": "relationship-supersession",
+    "kind": "supersession",
+    "initial": {
+      "memory_type": "state",
+      "predicate": "relationship status",
+      "value": "dating",
+      "importance": 0.9
+    },
+    "correction": {
+      "memory_type": "state",
+      "predicate": "relationship status",
+      "value": "single",
+      "importance": 0.9
+    },
+    "query": "What is my current relationship status?",
+    "expected_value": "single"
+  },
+  {
+    "id": "preference-correction",
+    "kind": "correction",
+    "initial": {
+      "memory_type": "preference",
+      "predicate": "favorite drink",
+      "value": "coffee",
+      "importance": 0.8
+    },
+    "correction": {
+      "memory_type": "preference",
+      "predicate": "favorite drink",
+      "value": "masala chai",
+      "importance": 0.8
+    },
+    "query": "What is my favorite drink?",
+    "expected_value": "masala chai"
+  },
+  {
+    "id": "temporal-relocation",
+    "kind": "supersession",
+    "initial": {
+      "memory_type": "state",
+      "predicate": "current location",
+      "value": "Pune",
+      "importance": 0.9
+    },
+    "correction": {
+      "memory_type": "state",
+      "predicate": "current location",
+      "value": "Bengaluru",
+      "importance": 0.9
+    },
+    "query": "Where do I currently live?",
+    "expected_value": "Bengaluru"
+  },
+  {
+    "id": "persona-pressure-52-turns",
+    "kind": "persona_pressure",
+    "turn_count": 52,
+    "expected_value": "Bengaluru"
+  }
+]
