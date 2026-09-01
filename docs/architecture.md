@@ -7,8 +7,9 @@ index. A correction never overwrites history silently: each add, update, superse
 extraction failure writes an immutable event. A superseding transaction marks the old row first,
 creates the replacement, links both rows, and commits them together.
 
-SQLite is the assessment adapter. SQLAlchemy models and Alembic migrations are present from the
-first persistent schema so the PostgreSQL adapter can preserve the same domain contract.
+SQLite is the assessment adapter. PostgreSQL uses the same SQLAlchemy repository contract with
+PostgreSQL full-text search and a `vector(384)` column. The ranking formula and active-memory
+invariants remain identical across adapters. Alembic owns schema evolution in both environments.
 
 ## Memory lifecycle
 
@@ -49,12 +50,36 @@ memories enter the generation context.
 | Generation fails | Keep user message; never persist a partial assistant message |
 | Persona extraction/repair fails | Persist and return a fixed persona-aligned fallback |
 
-The current synchronous storage orchestration is sufficient for the assessment. Product hardening
-adds per-session Redis locking and request idempotency before concurrent API access.
+The API adds one-active-request-per-session Redis locking and client-generated request idempotency.
+A repeated completed request returns the stored assistant result; a concurrent request for the same
+session receives a retryable conflict instead of racing the memory transaction.
+
+## Production boundaries
+
+```mermaid
+flowchart LR
+    U[Browser] -->|same origin| W[Next.js on Vercel]
+    W -->|INTERNAL_API_KEY| A[FastAPI on Railway]
+    A --> P[(PostgreSQL + pgvector)]
+    A --> R[(Redis)]
+    A --> X[xAI Responses API]
+    C[Daily cleanup job] --> P
+```
+
+The browser receives only a signed, Secure, HttpOnly, SameSite=Lax session cookie. Next.js is the
+backend-for-frontend and holds both the Railway URL and internal API key server-side. FastAPI limits
+messages to 4,000 characters, applies per-IP and per-session limits, serializes turns per session,
+and redacts conversation content from structured logs.
+
+Railway runs the API and cleanup job in Singapore. A pre-deploy Alembic command must succeed before
+a new API deployment is promoted. Readiness checks configuration, PostgreSQL, Redis, and the vector
+extension without spending an xAI request. The daily cleanup command deletes expired session graphs
+through database cascades.
 
 ## Security and privacy posture
 
-Memory text is treated as untrusted data and delimited separately from system instructions. Logs do
-not need raw conversation content. The inspector exposes memory provenance and scoring, not prompts
-or hidden reasoning. Secrets belong in runtime environment variables; `.env`, databases, model
-caches, and build output are ignored.
+Memory text is treated as untrusted data and delimited separately from system instructions. Normal
+logs include request ID, a hashed session ID, latency, model/token metadata, retrieval count, and
+resolver actions, but no raw conversation content. The inspector exposes memory provenance and
+scoring, not prompts or hidden reasoning. Secrets belong in runtime environment variables; `.env`,
+databases, model caches, and build output are ignored.

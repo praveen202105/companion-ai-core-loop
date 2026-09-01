@@ -1,9 +1,10 @@
 # Companion AI Core Loop
 
-Companion AI Core Loop is a persistence-first companion prototype built around a fixed persona,
+Companion AI Core Loop is a persistence-first companion product built around a fixed persona,
 auditable long-term memory, contradiction resolution, hybrid retrieval, and measurable persona
-consistency. The assessment implementation is usable from the CLI without paid credentials and
-switches to Grok through xAI's Responses API when `XAI_API_KEY` is supplied.
+consistency. Its assessment core runs locally without paid credentials; its production path adds a
+protected Next.js experience, FastAPI/SSE, PostgreSQL/pgvector, Redis, and Grok through xAI's
+Responses API.
 
 The companion is **Mira**: warm, grounded, lightly playful, non-romantic, and able to mirror
 English or natural Hinglish. Her identity is a versioned artifact rather than an improvised system
@@ -31,16 +32,20 @@ substitutes a heuristic score for the unavailable subjective judge.
 
 ```mermaid
 flowchart LR
-    CLI[CLI / later FastAPI] --> Turn[Chat turn orchestrator]
+    Browser --> BFF[Next.js BFF + signed HttpOnly cookie]
+    CLI[CLI] --> Turn[Chat turn orchestrator]
+    BFF --> API[FastAPI + SSE]
+    API --> Turn
     Turn --> Extract[Structured memory extraction]
     Extract --> Resolve[Canonical resolver]
-    Resolve --> Store[(SQLite + FTS5)]
+    Resolve --> Store[(SQLite/FTS5 or PostgreSQL/pgvector)]
     Store --> Retrieve[Lexical + vector retrieval]
     Retrieve --> Prompt[Top 6 memories + last 8 turns + Mira v1]
-    Prompt --> Grok[Grok / deterministic fake]
+    Prompt --> Grok[Grok or deterministic fake]
     Grok --> Guard[Persona claim checker + one repair]
     Guard --> Store
     Store --> Trace[Events and retrieval traces]
+    API --> Redis[(Redis limits + session locks)]
 ```
 
 Every user turn follows a fixed order:
@@ -59,8 +64,9 @@ observable candidates, decisions, selected memories, and numeric score factors.
 ## Repository layout
 
 ```text
-apps/api/                     Python domain, storage, AI providers, CLI, and tests
-apps/web/                     Next.js application (product milestone)
+apps/api/                     FastAPI, domain, storage, AI providers, CLI, and tests
+apps/web/                     Protected Next.js BFF and responsive chat application
+.railway/                     Railway project-level infrastructure as code
 evals/scenarios/              Versioned deterministic scenarios
 evals/results/                Real committed evaluation output
 docs/                         Architecture and walkthrough notes
@@ -79,6 +85,7 @@ nvm use
 make setup
 make lint
 make test
+make test-e2e
 make demo
 make eval
 ```
@@ -113,6 +120,32 @@ uv run --package companion-ai-api companion reset
 
 The database survives process restarts. Reset permanently deletes the session, its messages,
 memories, events, and traces through foreign-key cascades.
+
+## Web and API
+
+Run the two development processes in separate terminals after `make setup`:
+
+```bash
+make api
+make web
+```
+
+Open `http://localhost:3000` and use the development passcode from `.env` (the example is
+`companion-demo`). The browser talks only to same-origin Next.js route handlers. The BFF signs the
+anonymous session into an HttpOnly cookie and calls FastAPI with `INTERNAL_API_KEY`; backend
+credentials are never placed in the client bundle.
+
+The API surface is session-scoped:
+
+- `POST /v1/sessions`
+- `POST /v1/chat` with SSE events and a client-generated `request_id`
+- `GET /v1/sessions/{id}/messages`
+- `GET /v1/sessions/{id}/memories`
+- `DELETE /v1/sessions/{id}`
+- `GET /health/live` and `GET /health/ready`
+
+The inspector exposes active/superseded memories, resolver events, retrieval scores, and degraded
+mode—not prompts or chain-of-thought.
 
 ## Memory behavior
 
@@ -160,9 +193,12 @@ after the `assessment-v1.0.0` tag.
   scaling are outside this delivery's definition of production readiness.
 
 Production API, PostgreSQL/pgvector, Redis controls, the protected frontend, CI hardening, and
-Vercel/Railway deployment are implemented in the product milestone after the assessment tag.
+Vercel/Railway deployment artifacts are implemented after the assessment tag. See the operations
+runbook for the staging-first release and the two external prerequisites: an xAI key and the
+one-time pgvector extension command.
 
 ## Further reading
 
 - [Detailed architecture](docs/architecture.md)
 - [15–20 minute assessment walkthrough](docs/walkthrough.md)
+- [Production operations and recovery runbook](docs/operations.md)

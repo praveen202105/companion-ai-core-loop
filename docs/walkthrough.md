@@ -60,6 +60,7 @@ judge.
 
 ## 17:00–20:00 — Tradeoffs and production path
 
-Explain why the custom memory engine is primary and Mem0 is deferred. Close with the production
-extension: FastAPI/SSE, PostgreSQL/pgvector, Redis rate limits and locks, an HttpOnly-cookie Next.js
-BFF, passcode protection, retention cleanup, and staged Vercel/Railway deployment.
+Explain why the custom memory engine is primary and Mem0 is deferred. Close by showing the
+implemented production extension: FastAPI/SSE, PostgreSQL/pgvector, Redis rate limits and locks, an
+HttpOnly-cookie Next.js BFF, passcode protection, retention cleanup, and the staging-first
+Vercel/Railway runbook.
