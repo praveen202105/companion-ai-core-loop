@@ -4,8 +4,8 @@ import type { ReactNode } from "react";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Companion AI",
-  description: "A companion that remembers with care.",
+  title: "Mira — a companion who remembers",
+  description: "A warm, grounded AI companion with durable, inspectable memory.",
 };
 
 export default function RootLayout({ children }: Readonly<{ children: ReactNode }>) {
