@@ -6,6 +6,7 @@ from pydantic import BaseModel
 
 from companion.domain import (
     MemoryAction,
+    MemoryCandidate,
     MessageRole,
     MessageView,
 )
@@ -17,6 +18,7 @@ from companion.memory import (
     RetrievalResult,
     Retriever,
 )
+from companion.persona.checker import PersonaConsistencyChecker
 from companion.persona.models import PersonaSpec
 from companion.providers import LLMProvider
 from companion.storage import SqlAlchemyMemoryStore
@@ -43,6 +45,7 @@ class ChatEngine:
         retriever: Retriever,
         embedding_provider: EmbeddingProvider,
         persona: PersonaSpec,
+        persona_checker: PersonaConsistencyChecker | None = None,
     ) -> None:
         self.store = store
         self.provider = provider
@@ -51,6 +54,7 @@ class ChatEngine:
         self.retriever = retriever
         self.embedding_provider = embedding_provider
         self.persona = persona
+        self.persona_checker = persona_checker
 
     async def turn(
         self,
@@ -108,6 +112,14 @@ class ChatEngine:
             {"role": item.role.value, "content": item.content} for item in recent
         ]
         response = await self.provider.generate(system=system, messages=model_messages)
+        companion_claims: list[MemoryCandidate] = []
+        if self.persona_checker is not None:
+            guard = await self.persona_checker.guard(
+                session_id=session_id,
+                draft=response,
+            )
+            response = guard.response
+            companion_claims = guard.claims
         usage = self.provider.usage_snapshot()
         assistant_message = self.store.append_message(
             session_id=session_id,
@@ -118,6 +130,19 @@ class ChatEngine:
             input_tokens=self._optional_int(usage.get("input_tokens")),
             output_tokens=self._optional_int(usage.get("output_tokens")),
         )
+        for claim in companion_claims:
+            try:
+                embedding = self.embedding_provider.embed_one(claim.normalized_text)
+            except Exception:
+                embedding = None
+            resolutions.append(
+                await self.resolver.resolve(
+                    session_id=session_id,
+                    candidate=claim,
+                    source_message_id=assistant_message.id,
+                    embedding=embedding,
+                )
+            )
         return ChatTurnResult(
             user_message=user_message,
             assistant_message=assistant_message,

@@ -17,6 +17,7 @@ from companion.memory import (
     MemoryResolver,
     Retriever,
 )
+from companion.persona.checker import PersonaConsistencyChecker
 from companion.persona.loader import load_persona
 from companion.providers import FakeLLMProvider, LLMProvider, XAIResponsesProvider
 from companion.storage import Database, SqlAlchemyMemoryStore
@@ -63,6 +64,11 @@ def build_services(settings: Settings) -> AppServices:
 
     resolver = MemoryResolver(store, contradiction_judge=judge)
     retriever = Retriever(store, embedding_provider)
+    persona_checker = PersonaConsistencyChecker(
+        provider=provider,
+        persona=persona,
+        store=store,
+    )
     chat = ChatEngine(
         store=store,
         provider=provider,
@@ -71,5 +77,6 @@ def build_services(settings: Settings) -> AppServices:
         retriever=retriever,
         embedding_provider=embedding_provider,
         persona=persona,
+        persona_checker=persona_checker,
     )
     return AppServices(database=database, store=store, chat=chat)
