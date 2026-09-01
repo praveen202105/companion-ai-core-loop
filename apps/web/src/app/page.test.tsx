@@ -55,7 +55,7 @@ describe("Home", () => {
     );
     render(<Home />);
 
-    fireEvent.click(await screen.findByRole("button", { name: "memory" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Open memory inspector" }));
 
     expect(await screen.findByRole("dialog", { name: "Mira's memory inspector" })).toBeInTheDocument();
     expect(screen.getByText("The user's favorite drink is masala chai.")).toBeInTheDocument();

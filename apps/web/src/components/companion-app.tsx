@@ -183,7 +183,11 @@ export function CompanionApp() {
             <button className="icon-action" onClick={() => setConfirmReset(true)} aria-label="New chat">
               <NewChatIcon />
             </button>
-            <button className="memory-pill" onClick={() => void openInspector()}>
+            <button
+              className="memory-pill"
+              onClick={() => void openInspector()}
+              aria-label="Open memory inspector"
+            >
               <SparkIcon />
               <span>{inspector?.memories.length ? `${inspector.memories.length} memories` : "memory"}</span>
             </button>

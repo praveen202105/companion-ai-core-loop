@@ -23,6 +23,8 @@ htmlcov/
 # Node / Next.js
 node_modules/
 .next/
+playwright-report/
+test-results/
 out/
 coverage/
 playwright-report/
