@@ -45,9 +45,38 @@ class Database:
 
     def create_all(self) -> None:
         Base.metadata.create_all(self.engine)
+        if self.engine.dialect.name == "sqlite":
+            self._create_sqlite_fts()
 
     def drop_all(self) -> None:
         Base.metadata.drop_all(self.engine)
 
     def dispose(self) -> None:
         self.engine.dispose()
+
+    def _create_sqlite_fts(self) -> None:
+        statements = (
+            """CREATE VIRTUAL TABLE IF NOT EXISTS memory_fts USING fts5(
+                memory_id UNINDEXED,
+                session_id UNINDEXED,
+                normalized_text,
+                tokenize='unicode61 remove_diacritics 2'
+            )""",
+            """CREATE TRIGGER IF NOT EXISTS memory_fts_insert AFTER INSERT ON memories
+            WHEN new.status = 'active' BEGIN
+                INSERT INTO memory_fts(memory_id, session_id, normalized_text)
+                VALUES (new.id, new.session_id, new.normalized_text);
+            END""",
+            """CREATE TRIGGER IF NOT EXISTS memory_fts_delete AFTER DELETE ON memories BEGIN
+                DELETE FROM memory_fts WHERE memory_id = old.id;
+            END""",
+            """CREATE TRIGGER IF NOT EXISTS memory_fts_update AFTER UPDATE ON memories BEGIN
+                DELETE FROM memory_fts WHERE memory_id = old.id;
+                INSERT INTO memory_fts(memory_id, session_id, normalized_text)
+                SELECT new.id, new.session_id, new.normalized_text
+                WHERE new.status = 'active';
+            END""",
+        )
+        with self.engine.begin() as connection:
+            for statement in statements:
+                connection.exec_driver_sql(statement)

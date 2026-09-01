@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Iterable
 from datetime import UTC, datetime, timedelta
+from math import sqrt
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import delete, func, select
+from sqlalchemy import delete, func, select, text
 
 from companion.domain import (
     MemoryAction,
@@ -195,6 +197,74 @@ class SqlAlchemyMemoryStore:
         with self.database.session_factory() as session:
             return [self._memory_view(row) for row in session.scalars(statement).all()]
 
+    def search_lexical(
+        self,
+        *,
+        session_id: UUID,
+        query: str,
+        limit: int = 20,
+    ) -> list[StoredMemory]:
+        if self.database.engine.dialect.name != "sqlite":
+            raise NotImplementedError(
+                "PostgreSQL lexical search is provided by PostgresMemoryStore"
+            )
+        tokens = re.findall(r"\w+", query.casefold(), flags=re.UNICODE)
+        if not tokens:
+            return []
+        fts_query = " OR ".join(f'"{token.replace(chr(34), "")}"' for token in tokens)
+        sql = text(
+            """SELECT memory_id FROM memory_fts
+            WHERE memory_fts MATCH :query AND session_id = :session_id
+            ORDER BY bm25(memory_fts)
+            LIMIT :limit"""
+        )
+        with self.database.session_factory() as session:
+            ids = list(
+                session.scalars(
+                    sql,
+                    {"query": fts_query, "session_id": str(session_id), "limit": limit},
+                )
+            )
+            return self._ordered_memories(session, ids)
+
+    def search_vector(
+        self,
+        *,
+        session_id: UUID,
+        query_embedding: list[float],
+        limit: int = 20,
+    ) -> list[StoredMemory]:
+        with self.database.session_factory() as session:
+            records = list(
+                session.scalars(
+                    select(MemoryRecord).where(
+                        MemoryRecord.session_id == str(session_id),
+                        MemoryRecord.status == MemoryStatus.ACTIVE.value,
+                        MemoryRecord.embedding.is_not(None),
+                    )
+                )
+            )
+            records.sort(
+                key=lambda record: self._cosine_similarity(
+                    query_embedding, record.embedding or []
+                ),
+                reverse=True,
+            )
+            return [self._memory_view(record) for record in records[:limit]]
+
+    def mark_memories_accessed(self, memory_ids: Iterable[UUID]) -> None:
+        ids = [str(memory_id) for memory_id in memory_ids]
+        if not ids:
+            return
+        with self.database.session_factory.begin() as session:
+            records = list(
+                session.scalars(select(MemoryRecord).where(MemoryRecord.id.in_(ids)))
+            )
+            now = utc_now()
+            for record in records:
+                record.access_count += 1
+                record.last_accessed_at = now
+
     def update_memory(
         self,
         *,
@@ -377,6 +447,31 @@ class SqlAlchemyMemoryStore:
             )
             session.execute(delete(SessionRecord).where(SessionRecord.expires_at <= threshold))
             return int(expired_count or 0)
+
+    def _ordered_memories(self, session: Any, ids: list[str]) -> list[StoredMemory]:
+        if not ids:
+            return []
+        records = list(
+            session.scalars(
+                select(MemoryRecord).where(
+                    MemoryRecord.id.in_(ids),
+                    MemoryRecord.status == MemoryStatus.ACTIVE.value,
+                )
+            )
+        )
+        by_id = {record.id: record for record in records}
+        return [self._memory_view(by_id[memory_id]) for memory_id in ids if memory_id in by_id]
+
+    @staticmethod
+    def _cosine_similarity(left: list[float], right: list[float]) -> float:
+        if len(left) != len(right) or not left:
+            return -1.0
+        dot = sum(a * b for a, b in zip(left, right, strict=True))
+        left_norm = sqrt(sum(value * value for value in left))
+        right_norm = sqrt(sum(value * value for value in right))
+        if left_norm == 0 or right_norm == 0:
+            return -1.0
+        return dot / (left_norm * right_norm)
 
     @staticmethod
     def _message_view(record: MessageRecord) -> MessageView:
