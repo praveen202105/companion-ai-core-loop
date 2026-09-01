@@ -24,6 +24,7 @@ class Settings(BaseSettings):
     llm_provider: str = "fake"
     embedding_provider: str = "hash"
     internal_api_key: str = "local-internal-key-change-me"
+    cors_origins: list[str] = ["http://localhost:3000"]
     session_retention_days: int = Field(default=30, ge=1, le=365)
     chat_rate_limit_per_minute: int = Field(default=10, ge=1)
     chat_rate_limit_per_day: int = Field(default=100, ge=1)

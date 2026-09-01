@@ -120,6 +120,16 @@ class MessageView(BaseModel):
     created_at: datetime
 
 
+class SessionView(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    persona_version: str
+    created_at: datetime
+    last_activity_at: datetime
+    expires_at: datetime
+
+
 class RetrievalTraceView(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 

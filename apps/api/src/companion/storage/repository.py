@@ -17,6 +17,7 @@ from companion.domain import (
     MessageRole,
     MessageView,
     RetrievalTraceView,
+    SessionView,
     StoredMemory,
     utc_now,
 )
@@ -72,6 +73,19 @@ class SqlAlchemyMemoryStore:
     def session_exists(self, session_id: UUID) -> bool:
         with self.database.session_factory() as session:
             return session.get(SessionRecord, str(session_id)) is not None
+
+    def get_session(self, session_id: UUID) -> SessionView | None:
+        with self.database.session_factory() as session:
+            record = session.get(SessionRecord, str(session_id))
+            if record is None:
+                return None
+            return SessionView(
+                id=UUID(record.id),
+                persona_version=record.persona_version,
+                created_at=record.created_at,
+                last_activity_at=record.last_activity_at,
+                expires_at=record.expires_at,
+            )
 
     def append_message(
         self,
