@@ -42,4 +42,6 @@ tmp/
 
 # Deployment state
 .vercel/
-.railway/
+.railway/*
+!.railway/railway.ts
+!.railway/tsconfig.json

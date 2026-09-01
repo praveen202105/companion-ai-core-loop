@@ -5,6 +5,11 @@
   "scripts": {
     "dev:web": "pnpm --filter @companion/web dev",
     "build:web": "pnpm --filter @companion/web build",
-    "test:web": "pnpm --filter @companion/web test"
+    "test:web": "pnpm --filter @companion/web test",
+    "typecheck:infra": "tsc -p .railway/tsconfig.json"
+  },
+  "devDependencies": {
+    "railway": "^3.11.0",
+    "typescript": "^5.9.0"
   }
 }

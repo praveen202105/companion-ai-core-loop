@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import os
 from pathlib import Path
 from typing import Annotated
 from uuid import UUID
@@ -12,6 +13,7 @@ from companion.domain import MemoryStatus
 from companion.evaluation import run_evaluation
 from companion.factory import AppServices, build_services
 from companion.persona.loader import load_persona
+from companion.storage import Database, PostgresMemoryStore, SqlAlchemyMemoryStore
 
 app = typer.Typer(help="Mira companion CLI")
 memory_app = typer.Typer(help="Inspect durable memories and their audit history")
@@ -159,12 +161,26 @@ def eval_command(
 @app.command()
 def cleanup() -> None:
     """Permanently remove sessions whose retention window has expired."""
-    service = services()
+    database_url = os.environ.get("DATABASE_URL")
+    if not database_url:
+        raise typer.BadParameter("DATABASE_URL is required")
+    if database_url.startswith("postgres://"):
+        database_url = database_url.replace("postgres://", "postgresql+psycopg://", 1)
+    elif database_url.startswith("postgresql://"):
+        database_url = database_url.replace(
+            "postgresql://", "postgresql+psycopg://", 1
+        )
+    database = Database(database_url)
+    store = (
+        PostgresMemoryStore(database)
+        if database.engine.dialect.name == "postgresql"
+        else SqlAlchemyMemoryStore(database)
+    )
     try:
-        removed = service.store.cleanup_expired_sessions()
+        removed = store.cleanup_expired_sessions()
         typer.echo(f"Deleted {removed} expired session(s).")
     finally:
-        service.database.dispose()
+        database.dispose()
 
 
 def _print_memories(service: AppServices, session_id: UUID) -> None:
