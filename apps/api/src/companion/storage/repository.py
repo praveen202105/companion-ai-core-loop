@@ -34,13 +34,21 @@ def canonical_slug(value: str) -> str:
 
 
 def canonical_key(candidate: MemoryCandidate) -> str:
-    return ":".join(
-        (
-            candidate.owner.value,
-            canonical_slug(candidate.subject),
-            canonical_slug(candidate.predicate),
+    parts = [
+        candidate.owner.value,
+        canonical_slug(candidate.subject),
+        canonical_slug(candidate.predicate),
+    ]
+    if candidate.memory_type.value == "event":
+        parts.extend(
+            (
+                candidate.valid_from.date().isoformat()
+                if candidate.valid_from is not None
+                else "undated",
+                canonical_slug(candidate.value),
+            )
         )
-    )
+    return ":".join(parts)
 
 
 class SqlAlchemyMemoryStore:
