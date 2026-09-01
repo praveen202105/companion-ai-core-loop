@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import re
+from typing import Protocol
+
 from pydantic import BaseModel, ConfigDict, Field
 
-from companion.domain import MemoryCandidate
+from companion.domain import MemoryCandidate, MemoryType
 from companion.providers import LLMProvider
 
 EXTRACTION_PROMPT_VERSION = "memory-extraction-v1"
@@ -41,3 +44,58 @@ class MemoryExtractor:
             schema=MemoryExtraction,
         )
         return [candidate for candidate in result.candidates if candidate.should_store]
+
+
+class CandidateExtractor(Protocol):
+    async def extract(self, text: str) -> list[MemoryCandidate]: ...
+
+
+class DeterministicMemoryExtractor:
+    """Small credential-free extractor for local demos; production uses Grok."""
+
+    _patterns: tuple[tuple[re.Pattern[str], MemoryType, str, float], ...] = (
+        (
+            re.compile(r"\bmy name is\s+([\w -]{2,80})", re.IGNORECASE),
+            MemoryType.PROFILE,
+            "name",
+            0.9,
+        ),
+        (
+            re.compile(r"\b(?:i live in|i moved to|currently in)\s+([\w -]{2,80})", re.IGNORECASE),
+            MemoryType.STATE,
+            "current location",
+            0.9,
+        ),
+        (
+            re.compile(r"\b(?:i like|i love|mujhe)\s+([\w -]{2,100})", re.IGNORECASE),
+            MemoryType.PREFERENCE,
+            "likes",
+            0.7,
+        ),
+        (
+            re.compile(r"\bi am\s+(single|dating|married|engaged)\b", re.IGNORECASE),
+            MemoryType.STATE,
+            "relationship status",
+            0.9,
+        ),
+    )
+
+    async def extract(self, text: str) -> list[MemoryCandidate]:
+        candidates: list[MemoryCandidate] = []
+        for pattern, memory_type, predicate, importance in self._patterns:
+            match = pattern.search(text)
+            if match is None:
+                continue
+            value = match.group(1).strip(" .,!?")
+            candidates.append(
+                MemoryCandidate(
+                    memory_type=memory_type,
+                    subject="user",
+                    predicate=predicate,
+                    value=value,
+                    normalized_text=f"The user's {predicate} is {value}.",
+                    confidence=0.9,
+                    importance=importance,
+                )
+            )
+        return candidates

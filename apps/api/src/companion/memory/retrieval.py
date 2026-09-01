@@ -42,6 +42,7 @@ class Retriever:
         *,
         top_k: int = 6,
         now: datetime | None = None,
+        message_id: UUID | None = None,
     ) -> RetrievalResult:
         lexical = self.store.search_lexical(
             session_id=session_id,
@@ -82,6 +83,7 @@ class Retriever:
             session_id=session_id,
             query=query,
             candidate_count=len(combined),
+            message_id=message_id,
             degraded_mode=degraded_mode,
             selected=[
                 {

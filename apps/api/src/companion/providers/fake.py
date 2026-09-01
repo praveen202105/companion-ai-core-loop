@@ -11,7 +11,9 @@ from companion.providers.base import SchemaT
 class FakeLLMProvider:
     """Deterministic provider used for tests and credential-free development."""
 
-    def __init__(self, response: str = "I'm here with you.") -> None:
+    DEFAULT_RESPONSE = "I'm here with you."
+
+    def __init__(self, response: str = DEFAULT_RESPONSE) -> None:
         self.response = response
         self._structured: dict[type[BaseModel], BaseModel] = {}
         self._calls = 0
@@ -20,8 +22,13 @@ class FakeLLMProvider:
         self._structured[schema] = value
 
     async def generate(self, *, system: str, messages: list[dict[str, str]]) -> str:
-        del system, messages
         self._calls += 1
+        if self.response == self.DEFAULT_RESPONSE and "<memory>" in system:
+            memory = system.split("<memory>", maxsplit=1)[1].split("</memory>", maxsplit=1)[0]
+            first = next((line.removeprefix("- ") for line in memory.splitlines() if line), "")
+            if first:
+                return f"I remember that {first}"
+        del messages
         return self.response
 
     async def extract_structured(

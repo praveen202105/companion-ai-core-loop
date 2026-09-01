@@ -19,7 +19,7 @@ class LLMProvider(Protocol):
         schema: type[SchemaT],
     ) -> SchemaT: ...
 
-    async def stream(
+    def stream(
         self,
         *,
         system: str,
