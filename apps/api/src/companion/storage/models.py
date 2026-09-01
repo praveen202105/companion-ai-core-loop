@@ -16,7 +16,10 @@ from sqlalchemy import (
     UniqueConstraint,
     text,
 )
+from sqlalchemy.engine.interfaces import Dialect
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
+from sqlalchemy.sql.type_api import TypeEngine
+from sqlalchemy.types import TypeDecorator
 
 from companion.domain import (
     MemoryAction,
@@ -30,6 +33,20 @@ from companion.domain import (
 
 def new_uuid() -> str:
     return str(uuid4())
+
+
+class EmbeddingVector(TypeDecorator[list[float]]):
+    """SQLite JSON locally and pgvector's native vector type in PostgreSQL."""
+
+    impl = JSON
+    cache_ok = True
+
+    def load_dialect_impl(self, dialect: Dialect) -> TypeEngine[Any]:
+        if dialect.name == "postgresql":
+            from pgvector.sqlalchemy import Vector
+
+            return dialect.type_descriptor(Vector(384))
+        return dialect.type_descriptor(JSON())
 
 
 class Base(DeclarativeBase):
@@ -53,6 +70,11 @@ class MessageRecord(Base):
     __table_args__ = (
         UniqueConstraint("session_id", "sequence_no", name="uq_message_session_sequence"),
         UniqueConstraint("session_id", "request_id", name="uq_message_session_request"),
+        UniqueConstraint(
+            "session_id",
+            "reply_to_request_id",
+            name="uq_message_session_reply_request",
+        ),
     )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_uuid)
@@ -63,6 +85,7 @@ class MessageRecord(Base):
     role: Mapped[str] = mapped_column(String(16), nullable=False)
     content: Mapped[str] = mapped_column(Text, nullable=False)
     request_id: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    reply_to_request_id: Mapped[str | None] = mapped_column(String(80), nullable=True)
     model: Mapped[str | None] = mapped_column(String(120), nullable=True)
     prompt_version: Mapped[str | None] = mapped_column(String(32), nullable=True)
     input_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
@@ -111,7 +134,7 @@ class MemoryRecord(Base):
     superseded_by_id: Mapped[str | None] = mapped_column(
         ForeignKey("memories.id", ondelete="SET NULL"), nullable=True
     )
-    embedding: Mapped[list[float] | None] = mapped_column(JSON, nullable=True)
+    embedding: Mapped[list[float] | None] = mapped_column(EmbeddingVector(), nullable=True)
     access_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
     updated_at: Mapped[datetime] = mapped_column(

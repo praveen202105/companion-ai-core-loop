@@ -99,6 +99,8 @@ dependencies = [
     { name = "numpy" },
     { name = "openai" },
     { name = "orjson" },
+    { name = "pgvector" },
+    { name = "psycopg", extra = ["binary"] },
     { name = "pydantic" },
     { name = "pydantic-settings" },
     { name = "python-dotenv" },
@@ -123,10 +125,6 @@ dev = [
 embeddings = [
     { name = "sentence-transformers" },
 ]
-postgres = [
-    { name = "pgvector" },
-    { name = "psycopg", extra = ["binary"] },
-]
 
 [package.metadata]
 requires-dist = [
@@ -138,8 +136,8 @@ requires-dist = [
     { name = "numpy", specifier = ">=2.2,<3" },
     { name = "openai", specifier = ">=1.99,<3" },
     { name = "orjson", specifier = ">=3.10,<4" },
-    { name = "pgvector", marker = "extra == 'postgres'", specifier = ">=0.4,<1" },
-    { name = "psycopg", extras = ["binary"], marker = "extra == 'postgres'", specifier = ">=3.2,<4" },
+    { name = "pgvector", specifier = ">=0.4,<1" },
+    { name = "psycopg", extras = ["binary"], specifier = ">=3.2,<4" },
     { name = "pydantic", specifier = ">=2.11,<3" },
     { name = "pydantic-settings", specifier = ">=2.9,<3" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.4,<9" },
@@ -156,7 +154,7 @@ requires-dist = [
     { name = "types-pyyaml", marker = "extra == 'dev'", specifier = ">=6.0.12,<7" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.35,<1" },
 ]
-provides-extras = ["postgres", "embeddings", "dev"]
+provides-extras = ["embeddings", "dev"]
 
 [[package]]
 name = "coverage"

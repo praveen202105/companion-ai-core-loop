@@ -25,7 +25,13 @@ def include_object(
     compare_to: Any,
 ) -> bool:
     del object_, type_, reflected, compare_to
-    return name is None or not name.startswith("memory_fts")
+    manually_managed = {
+        "ix_memories_embedding_hnsw",
+        "ix_memories_normalized_text_fts",
+    }
+    return name is None or (
+        not name.startswith("memory_fts") and name not in manually_managed
+    )
 
 
 def run_migrations_offline() -> None:

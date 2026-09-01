@@ -125,6 +125,7 @@ class ChatEngine:
             session_id=session_id,
             role=MessageRole.ASSISTANT,
             content=response,
+            reply_to_request_id=request_id,
             model=str(usage.get("model", usage.get("provider", "unknown"))),
             prompt_version=CHAT_PROMPT_VERSION,
             input_tokens=self._optional_int(usage.get("input_tokens")),

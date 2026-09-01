@@ -59,6 +59,17 @@ async def test_session_chat_inspection_and_permanent_reset(
     assert "event: message.delta" in chat.text
     assert "event: message.completed" in chat.text
 
+    replay = await api_client.post(
+        "/v1/chat",
+        headers=auth(),
+        json={
+            "session_id": session_id,
+            "request_id": "request-api-001",
+            "message": "This duplicate must not create another turn",
+        },
+    )
+    assert '"replayed":true' in replay.text
+
     messages = await api_client.get(
         f"/v1/sessions/{session_id}/messages",
         headers=auth(),

@@ -113,6 +113,7 @@ class MessageView(BaseModel):
     role: MessageRole
     content: str
     request_id: str | None
+    reply_to_request_id: str | None
     model: str | None
     prompt_version: str | None
     input_tokens: int | None

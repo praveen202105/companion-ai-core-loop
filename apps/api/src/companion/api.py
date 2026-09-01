@@ -82,24 +82,81 @@ def register_routes(application: FastAPI) -> None:
             raise HTTPException(status_code=404, detail="Session not found")
 
         async def events() -> AsyncIterator[bytes]:
-            try:
-                result = await services.chat.turn(
-                    session_id=payload.session_id,
-                    request_id=payload.request_id,
-                    message=payload.message,
-                )
-                for resolution in result.resolutions:
-                    yield sse_event("memory.update", resolution.model_dump(mode="json"))
-                yield sse_event(
-                    "retrieval.trace",
-                    result.retrieval.trace.model_dump(mode="json"),
-                )
-                for delta in chunk_text(result.response):
-                    yield sse_event("message.delta", {"delta": delta})
+            existing = services.store.get_assistant_by_request(
+                payload.session_id,
+                payload.request_id,
+            )
+            if existing is not None:
+                for delta in chunk_text(existing.content):
+                    yield sse_event("message.delta", {"delta": delta, "replayed": True})
                 yield sse_event(
                     "message.completed",
-                    result.assistant_message.model_dump(mode="json"),
+                    {**existing.model_dump(mode="json"), "replayed": True},
                 )
+                return
+            client_ip = request.client.host if request.client else "unknown"
+            limit = await services.request_guard.check_rate_limit(
+                ip_address=client_ip,
+                session_id=payload.session_id,
+            )
+            if not limit.allowed:
+                yield sse_event(
+                    "error",
+                    {
+                        "code": "rate_limited",
+                        "message": "Too many requests. Please wait and retry.",
+                        "retryable": True,
+                        "retry_after_seconds": limit.retry_after_seconds,
+                    },
+                )
+                return
+            try:
+                async with services.request_guard.session_lock(payload.session_id) as acquired:
+                    if not acquired:
+                        yield sse_event(
+                            "error",
+                            {
+                                "code": "session_busy",
+                                "message": "Another message is already processing.",
+                                "retryable": True,
+                            },
+                        )
+                        return
+                    existing = services.store.get_assistant_by_request(
+                        payload.session_id,
+                        payload.request_id,
+                    )
+                    if existing is not None:
+                        for delta in chunk_text(existing.content):
+                            yield sse_event(
+                                "message.delta",
+                                {"delta": delta, "replayed": True},
+                            )
+                        yield sse_event(
+                            "message.completed",
+                            {**existing.model_dump(mode="json"), "replayed": True},
+                        )
+                        return
+                    result = await services.chat.turn(
+                        session_id=payload.session_id,
+                        request_id=payload.request_id,
+                        message=payload.message,
+                    )
+                    for resolution in result.resolutions:
+                        yield sse_event(
+                            "memory.update",
+                            resolution.model_dump(mode="json"),
+                        )
+                    yield sse_event(
+                        "retrieval.trace",
+                        result.retrieval.trace.model_dump(mode="json"),
+                    )
+                    for delta in chunk_text(result.response):
+                        yield sse_event("message.delta", {"delta": delta})
+                    yield sse_event(
+                        "message.completed",
+                        result.assistant_message.model_dump(mode="json"),
+                    )
             except Exception:
                 yield sse_event(
                     "error",
@@ -172,6 +229,10 @@ def register_routes(application: FastAPI) -> None:
             checks["database"] = "ok"
         except Exception:
             checks["database"] = "failed"
+        checks["vector_extension"] = (
+            "ok" if services.store.vector_extension_available() else "missing"
+        )
+        checks["redis"] = "ok" if await services.request_guard.ready() else "failed"
         settings = get_api_settings(request)
         if settings.llm_provider == "xai" and not settings.xai_api_key:
             checks["configuration"] = "missing_xai_api_key"

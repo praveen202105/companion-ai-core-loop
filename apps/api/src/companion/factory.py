@@ -20,7 +20,8 @@ from companion.memory import (
 from companion.persona.checker import PersonaConsistencyChecker
 from companion.persona.loader import load_persona
 from companion.providers import FakeLLMProvider, LLMProvider, XAIResponsesProvider
-from companion.storage import Database, SqlAlchemyMemoryStore
+from companion.request_control import LocalRequestGuard, RedisRequestGuard, RequestGuard
+from companion.storage import Database, PostgresMemoryStore, SqlAlchemyMemoryStore
 
 
 @dataclass
@@ -28,12 +29,18 @@ class AppServices:
     database: Database
     store: SqlAlchemyMemoryStore
     chat: ChatEngine
+    request_guard: RequestGuard
 
 
 def build_services(settings: Settings) -> AppServices:
     database = Database(settings.database_url)
-    database.create_all()
-    store = SqlAlchemyMemoryStore(database)
+    if settings.app_env not in {"staging", "production"}:
+        database.create_all()
+    store = (
+        PostgresMemoryStore(database)
+        if database.engine.dialect.name == "postgresql"
+        else SqlAlchemyMemoryStore(database)
+    )
     persona = load_persona()
 
     provider: LLMProvider
@@ -79,4 +86,21 @@ def build_services(settings: Settings) -> AppServices:
         persona=persona,
         persona_checker=persona_checker,
     )
-    return AppServices(database=database, store=store, chat=chat)
+    request_guard: RequestGuard
+    if settings.redis_url:
+        request_guard = RedisRequestGuard(
+            url=settings.redis_url,
+            per_minute=settings.chat_rate_limit_per_minute,
+            per_day=settings.chat_rate_limit_per_day,
+        )
+    else:
+        request_guard = LocalRequestGuard(
+            per_minute=settings.chat_rate_limit_per_minute,
+            per_day=settings.chat_rate_limit_per_day,
+        )
+    return AppServices(
+        database=database,
+        store=store,
+        chat=chat,
+        request_guard=request_guard,
+    )

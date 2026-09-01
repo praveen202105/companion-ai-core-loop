@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from functools import lru_cache
 
-from pydantic import Field
+from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -28,6 +28,15 @@ class Settings(BaseSettings):
     session_retention_days: int = Field(default=30, ge=1, le=365)
     chat_rate_limit_per_minute: int = Field(default=10, ge=1)
     chat_rate_limit_per_day: int = Field(default=100, ge=1)
+
+    @field_validator("database_url")
+    @classmethod
+    def normalize_postgres_driver(cls, value: str) -> str:
+        if value.startswith("postgres://"):
+            return value.replace("postgres://", "postgresql+psycopg://", 1)
+        if value.startswith("postgresql://"):
+            return value.replace("postgresql://", "postgresql+psycopg://", 1)
+        return value
 
 
 @lru_cache

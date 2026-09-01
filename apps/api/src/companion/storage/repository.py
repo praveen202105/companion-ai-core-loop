@@ -94,6 +94,7 @@ class SqlAlchemyMemoryStore:
         role: MessageRole,
         content: str,
         request_id: str | None = None,
+        reply_to_request_id: str | None = None,
         model: str | None = None,
         prompt_version: str | None = None,
         input_tokens: int | None = None,
@@ -111,6 +112,7 @@ class SqlAlchemyMemoryStore:
                 role=role.value,
                 content=content,
                 request_id=request_id,
+                reply_to_request_id=reply_to_request_id,
                 model=model,
                 prompt_version=prompt_version,
                 input_tokens=input_tokens,
@@ -141,6 +143,20 @@ class SqlAlchemyMemoryStore:
                 select(MessageRecord).where(
                     MessageRecord.session_id == str(session_id),
                     MessageRecord.request_id == request_id,
+                )
+            )
+            return self._message_view(record) if record else None
+
+    def get_assistant_by_request(
+        self,
+        session_id: UUID,
+        request_id: str,
+    ) -> MessageView | None:
+        with self.database.session_factory() as session:
+            record = session.scalar(
+                select(MessageRecord).where(
+                    MessageRecord.session_id == str(session_id),
+                    MessageRecord.reply_to_request_id == request_id,
                 )
             )
             return self._message_view(record) if record else None
@@ -218,10 +234,32 @@ class SqlAlchemyMemoryStore:
         query: str,
         limit: int = 20,
     ) -> list[StoredMemory]:
-        if self.database.engine.dialect.name != "sqlite":
-            raise NotImplementedError(
-                "PostgreSQL lexical search is provided by PostgresMemoryStore"
+        if self.database.engine.dialect.name == "postgresql":
+            sql = text(
+                """SELECT id FROM memories
+                WHERE session_id = :session_id AND status = 'active'
+                  AND to_tsvector('simple', normalized_text)
+                      @@ plainto_tsquery('simple', :query)
+                ORDER BY ts_rank(
+                    to_tsvector('simple', normalized_text),
+                    plainto_tsquery('simple', :query)
+                ) DESC
+                LIMIT :limit"""
             )
+            with self.database.session_factory() as session:
+                ids = list(
+                    session.scalars(
+                        sql,
+                        {
+                            "query": query,
+                            "session_id": str(session_id),
+                            "limit": limit,
+                        },
+                    )
+                )
+                return self._ordered_memories(session, ids)
+        if self.database.engine.dialect.name != "sqlite":
+            raise NotImplementedError("Unsupported lexical-search dialect")
         tokens = re.findall(r"\w+", query.casefold(), flags=re.UNICODE)
         if not tokens:
             return []
@@ -248,6 +286,26 @@ class SqlAlchemyMemoryStore:
         query_embedding: list[float],
         limit: int = 20,
     ) -> list[StoredMemory]:
+        if self.database.engine.dialect.name == "postgresql":
+            vector_literal = "[" + ",".join(f"{value:.10g}" for value in query_embedding) + "]"
+            sql = text(
+                """SELECT id FROM memories
+                WHERE session_id = :session_id AND status = 'active' AND embedding IS NOT NULL
+                ORDER BY embedding <=> CAST(:embedding AS vector)
+                LIMIT :limit"""
+            )
+            with self.database.session_factory() as session:
+                ids = list(
+                    session.scalars(
+                        sql,
+                        {
+                            "session_id": str(session_id),
+                            "embedding": vector_literal,
+                            "limit": limit,
+                        },
+                    )
+                )
+                return self._ordered_memories(session, ids)
         with self.database.session_factory() as session:
             records = list(
                 session.scalars(
@@ -462,6 +520,15 @@ class SqlAlchemyMemoryStore:
             session.execute(delete(SessionRecord).where(SessionRecord.expires_at <= threshold))
             return int(expired_count or 0)
 
+    def vector_extension_available(self) -> bool:
+        if self.database.engine.dialect.name != "postgresql":
+            return True
+        with self.database.session_factory() as session:
+            installed = session.scalar(
+                text("SELECT EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'vector')")
+            )
+            return bool(installed)
+
     def _ordered_memories(self, session: Any, ids: list[str]) -> list[StoredMemory]:
         if not ids:
             return []
@@ -496,6 +563,7 @@ class SqlAlchemyMemoryStore:
             role=MessageRole(record.role),
             content=record.content,
             request_id=record.request_id,
+            reply_to_request_id=record.reply_to_request_id,
             model=record.model,
             prompt_version=record.prompt_version,
             input_tokens=record.input_tokens,

@@ -13,7 +13,7 @@ from companion.domain import (
     StoredMemory,
 )
 from companion.providers import LLMProvider
-from companion.storage import SqlAlchemyMemoryStore
+from companion.storage import MemoryStore
 from companion.storage.repository import canonical_key
 
 CONTRADICTION_PROMPT_VERSION = "contradiction-v1"
@@ -70,7 +70,7 @@ class LLMContradictionJudge:
 class MemoryResolver:
     def __init__(
         self,
-        store: SqlAlchemyMemoryStore,
+        store: MemoryStore,
         *,
         contradiction_judge: ContradictionJudge | None = None,
     ) -> None:

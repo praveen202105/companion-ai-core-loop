@@ -9,7 +9,7 @@ from pydantic import BaseModel, Field
 
 from companion.domain import MemoryType, RetrievalTraceView, StoredMemory
 from companion.embeddings import EmbeddingProvider
-from companion.storage import SqlAlchemyMemoryStore
+from companion.storage import MemoryStore
 
 
 class RetrievedMemory(BaseModel):
@@ -26,7 +26,7 @@ class RetrievalResult(BaseModel):
 class Retriever:
     def __init__(
         self,
-        store: SqlAlchemyMemoryStore,
+        store: MemoryStore,
         embedding_provider: EmbeddingProvider,
         *,
         rrf_k: int = 60,
