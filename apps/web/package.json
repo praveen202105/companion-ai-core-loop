@@ -9,7 +9,8 @@
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "test:e2e": "playwright test"
+    "test:e2e": "playwright test",
+    "hash-passcode": "node scripts/hash-passcode.mjs"
   },
   "dependencies": {
     "next": "^16.0.0",

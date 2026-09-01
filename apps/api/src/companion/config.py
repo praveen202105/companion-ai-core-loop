@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from functools import lru_cache
 
-from pydantic import Field, field_validator
+from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -37,6 +37,25 @@ class Settings(BaseSettings):
         if value.startswith("postgresql://"):
             return value.replace("postgresql://", "postgresql+psycopg://", 1)
         return value
+
+    @model_validator(mode="after")
+    def validate_deployed_configuration(self) -> Settings:
+        if self.app_env not in {"staging", "production"}:
+            return self
+        missing: list[str] = []
+        if not self.database_url.startswith("postgresql+psycopg://"):
+            missing.append("DATABASE_URL must use PostgreSQL")
+        if not self.redis_url:
+            missing.append("REDIS_URL")
+        if self.llm_provider != "xai" or not self.xai_api_key:
+            missing.append("LLM_PROVIDER=xai and XAI_API_KEY")
+        if len(self.internal_api_key) < 32 or "change-me" in self.internal_api_key:
+            missing.append("a strong INTERNAL_API_KEY")
+        if not self.cors_origins or "*" in self.cors_origins:
+            missing.append("restrictive CORS_ORIGINS")
+        if missing:
+            raise ValueError("Invalid deployed configuration: " + ", ".join(missing))
+        return self
 
 
 @lru_cache

@@ -101,3 +101,5 @@ async def test_health_checks_do_not_call_model(api_client: httpx.AsyncClient) ->
     assert live.json() == {"status": "ok", "checks": {}}
     assert ready.status_code == 200
     assert ready.json()["checks"]["database"] == "ok"
+    assert ready.headers["x-content-type-options"] == "nosniff"
+    assert ready.headers["x-frame-options"] == "DENY"

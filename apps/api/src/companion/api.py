@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 import hmac
+import time
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from typing import Annotated, Any
-from uuid import UUID
+from uuid import UUID, uuid4
 
 import orjson
 from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request, Response, status
@@ -25,6 +26,7 @@ from companion.api_models import (
 from companion.config import Settings, get_settings
 from companion.domain import MemoryStatus
 from companion.factory import AppServices, build_services
+from companion.observability import configure_logging, hash_session, log_event
 from companion.persona.loader import load_persona
 
 
@@ -33,6 +35,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @asynccontextmanager
     async def lifespan(application: FastAPI) -> AsyncIterator[None]:
+        configure_logging()
         if not hasattr(application.state, "services"):
             application.state.services = build_services(configured)
         yield
@@ -50,8 +53,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         allow_origins=configured.cors_origins,
         allow_credentials=True,
         allow_methods=["GET", "POST", "DELETE"],
-        allow_headers=["Content-Type", "X-Internal-API-Key"],
+        allow_headers=["Content-Type", "X-Internal-API-Key", "X-Request-ID"],
     )
+    register_middleware(application)
     register_routes(application)
     return application
 
@@ -85,6 +89,7 @@ def register_routes(application: FastAPI) -> None:
             raise HTTPException(status_code=404, detail="Session not found")
 
         async def events() -> AsyncIterator[bytes]:
+            started = time.perf_counter()
             existing = services.store.get_assistant_by_request(
                 payload.session_id,
                 payload.request_id,
@@ -175,7 +180,25 @@ def register_routes(application: FastAPI) -> None:
                         "message.completed",
                         result.assistant_message.model_dump(mode="json"),
                     )
-            except Exception:
+                    log_event(
+                        "chat_completed",
+                        request_id=payload.request_id,
+                        session_hash=hash_session(payload.session_id),
+                        latency_ms=round((time.perf_counter() - started) * 1_000, 2),
+                        model=result.assistant_message.model,
+                        input_tokens=result.assistant_message.input_tokens,
+                        output_tokens=result.assistant_message.output_tokens,
+                        retrieval_count=len(result.retrieval.memories),
+                        resolver_actions=[item.action for item in result.resolutions],
+                    )
+            except Exception as error:
+                log_event(
+                    "chat_failed",
+                    request_id=payload.request_id,
+                    session_hash=hash_session(payload.session_id),
+                    latency_ms=round((time.perf_counter() - started) * 1_000, 2),
+                    error_type=type(error).__name__,
+                )
                 yield sse_event(
                     "error",
                     {
@@ -297,6 +320,39 @@ def register_routes(application: FastAPI) -> None:
                 content=HealthResponse(status=ready_status, checks=checks).model_dump(),
             )
         return HealthResponse(status=ready_status, checks=checks)
+
+
+def register_middleware(application: FastAPI) -> None:
+    @application.middleware("http")
+    async def request_telemetry(request: Request, call_next: Any) -> Response:
+        started = time.perf_counter()
+        request_id = request.headers.get("X-Request-ID") or str(uuid4())
+        try:
+            response = await call_next(request)
+        except Exception as error:
+            log_event(
+                "http_request_failed",
+                request_id=request_id,
+                method=request.method,
+                path=request.url.path,
+                latency_ms=round((time.perf_counter() - started) * 1_000, 2),
+                error_type=type(error).__name__,
+            )
+            raise
+        response.headers["X-Request-ID"] = request_id
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        response.headers["X-Frame-Options"] = "DENY"
+        response.headers["Referrer-Policy"] = "no-referrer"
+        response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
+        log_event(
+            "http_request_completed",
+            request_id=request_id,
+            method=request.method,
+            path=request.url.path,
+            status_code=response.status_code,
+            latency_ms=round((time.perf_counter() - started) * 1_000, 2),
+        )
+        return response
 
 
 def get_services(request: Request) -> AppServices:

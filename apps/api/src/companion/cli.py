@@ -156,6 +156,17 @@ def eval_command(
         raise typer.Exit(code=1)
 
 
+@app.command()
+def cleanup() -> None:
+    """Permanently remove sessions whose retention window has expired."""
+    service = services()
+    try:
+        removed = service.store.cleanup_expired_sessions()
+        typer.echo(f"Deleted {removed} expired session(s).")
+    finally:
+        service.database.dispose()
+
+
 def _print_memories(service: AppServices, session_id: UUID) -> None:
     memories = service.store.list_memories(session_id, status=MemoryStatus.ACTIVE)
     if not memories:

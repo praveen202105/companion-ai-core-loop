@@ -1,8 +1,9 @@
 SHELL := /bin/sh
 API_DIR := apps/api
 WEB_FILTER := @companion/web
+export PYTHONPATH := $(CURDIR)/apps/api/src
 
-.PHONY: setup lint test demo eval dev api web
+.PHONY: setup lint test test-e2e demo eval dev api web cleanup
 
 setup:
 	uv sync --all-packages --extra dev
@@ -18,6 +19,9 @@ test:
 	uv run --package companion-ai-api pytest apps/api/tests -q
 	pnpm --filter $(WEB_FILTER) test
 
+test-e2e:
+	pnpm --filter $(WEB_FILTER) test:e2e
+
 demo:
 	uv run --package companion-ai-api companion demo
 
@@ -32,3 +36,6 @@ api:
 
 web:
 	pnpm --filter $(WEB_FILTER) dev
+
+cleanup:
+	uv run --package companion-ai-api companion cleanup

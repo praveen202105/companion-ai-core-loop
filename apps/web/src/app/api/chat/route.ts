@@ -28,6 +28,7 @@ export async function POST(request: Request) {
   }
   const upstream = await backendFetch("/v1/chat", {
     method: "POST",
+    headers: { "X-Request-ID": parsed.data.request_id },
     body: JSON.stringify({ session_id: sessionId, ...parsed.data }),
   });
   if (!upstream.ok || !upstream.body) {
