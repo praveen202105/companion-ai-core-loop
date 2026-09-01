@@ -1,0 +1,5 @@
+[tool.uv.workspace]
+members = ["apps/api"]
+
+[tool.uv]
+package = false
