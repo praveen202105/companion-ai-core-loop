@@ -92,3 +92,26 @@ async def test_extraction_failure_still_allows_response(
 
     assert result.response == "Still here."
     assert store.memory_history(session_id)[0].action == MemoryAction.EXTRACTION_FAILED
+
+
+async def test_retry_resumes_after_user_message_was_already_persisted(
+    store: SqlAlchemyMemoryStore,
+) -> None:
+    provider = FakeLLMProvider("Recovered response")
+    chat = engine(store, provider)
+    session_id = store.create_session(persona_version="1.0.0")
+    store.append_message(
+        session_id=session_id,
+        role=MessageRole.USER,
+        content="Please retry",
+        request_id="retry-request-01",
+    )
+
+    result = await chat.turn(
+        session_id=session_id,
+        message="Please retry",
+        request_id="retry-request-01",
+    )
+
+    assert result.response == "Recovered response"
+    assert len(store.list_messages(session_id)) == 2

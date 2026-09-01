@@ -2,7 +2,7 @@
 
 import { FormEvent, KeyboardEvent, useCallback, useEffect, useRef, useState } from "react";
 
-import type { ChatMessage, SSEEvent } from "@/lib/contracts";
+import type { ChatMessage, MemoryInspectorPayload, SSEEvent } from "@/lib/contracts";
 import { consumeSSE } from "@/lib/sse";
 
 type AppState = "loading" | "locked" | "ready" | "unavailable";
@@ -13,6 +13,11 @@ export function CompanionApp() {
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [retryTurn, setRetryTurn] = useState<{ message: string; requestId: string } | null>(null);
+  const [inspectorOpen, setInspectorOpen] = useState(false);
+  const [inspector, setInspector] = useState<MemoryInspectorPayload | null>(null);
+  const [inspectorLoading, setInspectorLoading] = useState(false);
+  const [confirmReset, setConfirmReset] = useState(false);
+  const [resetting, setResetting] = useState(false);
   const viewport = useRef<HTMLDivElement>(null);
 
   const initializeSession = useCallback(async () => {
@@ -43,7 +48,9 @@ export function CompanionApp() {
   }, [bootstrap]);
 
   useEffect(() => {
-    viewport.current?.scrollTo({ top: viewport.current.scrollHeight, behavior: "smooth" });
+    if (typeof viewport.current?.scrollTo === "function") {
+      viewport.current.scrollTo({ top: viewport.current.scrollHeight, behavior: "smooth" });
+    }
   }, [messages]);
 
   async function unlocked() {
@@ -95,6 +102,38 @@ export function CompanionApp() {
     }
   }
 
+  async function openInspector() {
+    setInspectorOpen(true);
+    setInspectorLoading(true);
+    try {
+      const response = await fetch("/api/memories", { cache: "no-store" });
+      if (!response.ok) throw new Error("Could not load memory inspector");
+      setInspector((await response.json()) as MemoryInspectorPayload);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Could not load memories.");
+    } finally {
+      setInspectorLoading(false);
+    }
+  }
+
+  async function resetSession() {
+    setResetting(true);
+    setError(null);
+    try {
+      const deleted = await fetch("/api/session", { method: "DELETE" });
+      if (!deleted.ok) throw new Error("Could not reset this session.");
+      setMessages([]);
+      setInspector(null);
+      setInspectorOpen(false);
+      setConfirmReset(false);
+      await initializeSession();
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Could not reset this session.");
+    } finally {
+      setResetting(false);
+    }
+  }
+
   function handleEvent(event: SSEEvent, assistantId: string) {
     if (event.event === "message.delta") {
       const delta = String(event.data.delta || "");
@@ -140,9 +179,14 @@ export function CompanionApp() {
               <div className="presence"><span /> here with you</div>
             </div>
           </div>
-          <div className="memory-pill" title="Long-term memory is active">
-            <SparkIcon />
-            <span>memory on</span>
+          <div className="header-actions">
+            <button className="icon-action" onClick={() => setConfirmReset(true)} aria-label="New chat">
+              <NewChatIcon />
+            </button>
+            <button className="memory-pill" onClick={() => void openInspector()}>
+              <SparkIcon />
+              <span>{inspector?.memories.length ? `${inspector.memories.length} memories` : "memory"}</span>
+            </button>
           </div>
         </header>
 
@@ -170,6 +214,20 @@ export function CompanionApp() {
           <p className="privacy-note">Private by default · Mira can make mistakes</p>
         </div>
       </section>
+      <MemoryInspector
+        open={inspectorOpen}
+        loading={inspectorLoading}
+        payload={inspector}
+        onClose={() => setInspectorOpen(false)}
+        onReset={() => setConfirmReset(true)}
+      />
+      {confirmReset ? (
+        <ConfirmReset
+          resetting={resetting}
+          onCancel={() => setConfirmReset(false)}
+          onConfirm={() => void resetSession()}
+        />
+      ) : null}
     </main>
   );
 }
@@ -298,6 +356,165 @@ function MessageComposer({ disabled, onSend }: { disabled: boolean; onSend: (val
   );
 }
 
+function MemoryInspector({
+  open,
+  loading,
+  payload,
+  onClose,
+  onReset,
+}: {
+  open: boolean;
+  loading: boolean;
+  payload: MemoryInspectorPayload | null;
+  onClose: () => void;
+  onReset: () => void;
+}) {
+  const [tab, setTab] = useState<"memories" | "timeline">("memories");
+  if (!open) return null;
+  const selected = new Map(payload?.trace?.selected.map((item) => [item.memory_id, item]));
+  return (
+    <div className="drawer-layer" role="presentation" onMouseDown={onClose}>
+      <aside
+        className="memory-drawer"
+        role="dialog"
+        aria-modal="true"
+        aria-label="Mira's memory inspector"
+        onMouseDown={(event) => event.stopPropagation()}
+      >
+        <div className="drawer-header">
+          <div>
+            <p className="drawer-eyebrow">Transparent by design</p>
+            <h2>Mira&apos;s memory</h2>
+          </div>
+          <button className="close-action" onClick={onClose} aria-label="Close memory inspector">
+            <CloseIcon />
+          </button>
+        </div>
+        <p className="drawer-copy">
+          Only active facts can shape a reply. Old values stay in the audit timeline but are never
+          retrieved.
+        </p>
+        <div className="drawer-tabs" role="tablist">
+          <button className={tab === "memories" ? "active" : ""} onClick={() => setTab("memories")} role="tab">
+            Active memories <span>{payload?.memories.length || 0}</span>
+          </button>
+          <button className={tab === "timeline" ? "active" : ""} onClick={() => setTab("timeline")} role="tab">
+            Timeline
+          </button>
+        </div>
+
+        <div className="drawer-content">
+          {loading ? <InspectorSkeleton /> : null}
+          {!loading && tab === "memories" ? (
+            payload?.memories.length ? (
+              <div className="memory-stack">
+                {payload.memories.map((memory) => {
+                  const retrieval = selected.get(memory.id);
+                  return (
+                    <article className="memory-card" key={memory.id}>
+                      <div className="memory-card-top">
+                        <span className={`memory-type ${memory.memory_type}`}>{memory.memory_type}</span>
+                        {retrieval ? <span className="used-badge">used last turn</span> : null}
+                      </div>
+                      <p>{memory.normalized_text}</p>
+                      <div className="memory-meta">
+                        <span>{Math.round(memory.confidence * 100)}% confidence</span>
+                        <span>importance {memory.importance.toFixed(1)}</span>
+                        {retrieval ? <span>score {retrieval.score.toFixed(3)}</span> : null}
+                      </div>
+                      {retrieval ? (
+                        <details>
+                          <summary>Why this was selected</summary>
+                          <div className="factor-grid">
+                            {Object.entries(retrieval.factors)
+                              .filter(([key]) => !key.endsWith("_rank"))
+                              .map(([key, value]) => (
+                                <span key={key}><b>{key}</b>{value.toFixed(3)}</span>
+                              ))}
+                          </div>
+                        </details>
+                      ) : null}
+                    </article>
+                  );
+                })}
+              </div>
+            ) : (
+              <InspectorEmpty />
+            )
+          ) : null}
+          {!loading && tab === "timeline" ? (
+            payload?.events.length ? (
+              <ol className="timeline-list">
+                {[...payload.events].reverse().map((event) => (
+                  <li key={event.id}>
+                    <span className={`event-dot ${event.action}`} />
+                    <div>
+                      <b>{event.action.replace("_", " ")}</b>
+                      <p>{friendlyKey(event.canonical_key)}</p>
+                      <small>{event.reason_code.replaceAll("_", " ")}</small>
+                    </div>
+                  </li>
+                ))}
+              </ol>
+            ) : (
+              <InspectorEmpty />
+            )
+          ) : null}
+        </div>
+        <div className="drawer-footer">
+          <p>Prompts and private model reasoning are never shown here.</p>
+          <button onClick={onReset}>Delete this session</button>
+        </div>
+      </aside>
+    </div>
+  );
+}
+
+function ConfirmReset({
+  resetting,
+  onCancel,
+  onConfirm,
+}: {
+  resetting: boolean;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  return (
+    <div className="modal-layer" role="presentation">
+      <section className="confirm-modal" role="alertdialog" aria-modal="true" aria-labelledby="reset-title">
+        <div className="warning-mark">!</div>
+        <h2 id="reset-title">Start with a clean slate?</h2>
+        <p>This permanently deletes this conversation, every memory, and its audit history.</p>
+        <div className="modal-actions">
+          <button className="secondary" onClick={onCancel} disabled={resetting}>Keep this chat</button>
+          <button className="danger" onClick={onConfirm} disabled={resetting}>
+            {resetting ? "Deleting…" : "Delete and start over"}
+          </button>
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function InspectorSkeleton() {
+  return <div className="inspector-skeleton"><i /><i /><i /></div>;
+}
+
+function InspectorEmpty() {
+  return (
+    <div className="inspector-empty">
+      <SparkIcon />
+      <h3>Nothing saved yet</h3>
+      <p>Mira only keeps stable details that may help in a later conversation.</p>
+    </div>
+  );
+}
+
+function friendlyKey(key: string | null) {
+  if (!key) return "No canonical memory changed";
+  return key.split(":").slice(2).join(" · ").replaceAll("_", " ");
+}
+
 function LoadingScreen() {
   return <main className="status-shell"><MiraMark large /><span className="loading-line" /></main>;
 }
@@ -323,6 +540,14 @@ function ArrowIcon() {
 
 function SparkIcon() {
   return <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3c.6 4.7 3.3 7.4 8 8-4.7.6-7.4 3.3-8 8-.6-4.7-3.3-7.4-8-8 4.7-.6 7.4-3.3 8-8Z" /></svg>;
+}
+
+function NewChatIcon() {
+  return <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 20H5a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2h8" /><path d="M16 3v6M13 6h6M8 10h7M8 14h5" /></svg>;
+}
+
+function CloseIcon() {
+  return <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18" /></svg>;
 }
 
 function TypingDots() {

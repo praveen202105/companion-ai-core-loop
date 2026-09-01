@@ -6,11 +6,9 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field
 
 from companion.domain import (
-    MemoryEventView,
     MemoryStatus,
     MessageView,
     SessionView,
-    StoredMemory,
 )
 
 
@@ -30,10 +28,37 @@ class MessagesResponse(BaseModel):
     messages: list[MessageView]
 
 
+class MemoryInspectorItem(BaseModel):
+    id: UUID
+    canonical_key: str
+    memory_type: str
+    normalized_text: str
+    value: str
+    status: MemoryStatus
+    confidence: float
+    importance: float
+
+
+class MemoryEventItem(BaseModel):
+    id: UUID
+    action: str
+    canonical_key: str | None
+    reason_code: str
+    created_at: str
+
+
+class RetrievalInspectorTrace(BaseModel):
+    algorithm_version: str
+    candidate_count: int
+    selected: list[dict[str, Any]]
+    degraded_mode: str | None
+
+
 class MemoriesResponse(BaseModel):
     status: MemoryStatus
-    memories: list[StoredMemory]
-    events: list[MemoryEventView]
+    memories: list[MemoryInspectorItem]
+    events: list[MemoryEventItem]
+    trace: RetrievalInspectorTrace | None
 
 
 class HealthResponse(BaseModel):

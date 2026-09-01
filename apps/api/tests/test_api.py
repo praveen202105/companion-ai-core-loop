@@ -80,6 +80,10 @@ async def test_session_chat_inspection_and_permanent_reset(
     )
     assert len(messages.json()["messages"]) == 2
     assert memories.json()["memories"][0]["value"] == "Pune"
+    assert "embedding" not in memories.json()["memories"][0]
+    assert memories.json()["trace"]["selected"][0]["factors"]
+    assert "query" not in memories.json()["trace"]
+    assert "embedding" not in chat.text
 
     deleted = await api_client.delete(f"/v1/sessions/{session_id}", headers=auth())
     missing = await api_client.get(

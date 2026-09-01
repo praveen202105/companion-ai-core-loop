@@ -45,3 +45,19 @@ export async function POST() {
   }
   return NextResponse.json({ ready: true, messages });
 }
+
+export async function DELETE() {
+  if (!(await isUnlocked())) {
+    return NextResponse.json({ error: "Locked" }, { status: 401 });
+  }
+  const sessionId = await getSessionId();
+  if (sessionId) {
+    const deleted = await backendFetch(`/v1/sessions/${sessionId}`, { method: "DELETE" });
+    if (!deleted.ok && deleted.status !== 404) {
+      return NextResponse.json({ error: "Could not reset session" }, { status: 502 });
+    }
+  }
+  const store = await cookies();
+  store.delete(SESSION_COOKIE);
+  return NextResponse.json({ deleted: true });
+}

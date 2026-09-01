@@ -16,7 +16,10 @@ from companion.api_models import (
     ChatRequest,
     HealthResponse,
     MemoriesResponse,
+    MemoryEventItem,
+    MemoryInspectorItem,
     MessagesResponse,
+    RetrievalInspectorTrace,
     SessionResponse,
 )
 from companion.config import Settings, get_settings
@@ -143,9 +146,24 @@ def register_routes(application: FastAPI) -> None:
                         message=payload.message,
                     )
                     for resolution in result.resolutions:
+                        memory = resolution.memory
                         yield sse_event(
                             "memory.update",
-                            resolution.model_dump(mode="json"),
+                            {
+                                "action": resolution.action,
+                                "reason_code": resolution.reason_code,
+                                "memory": (
+                                    {
+                                        "id": str(memory.id),
+                                        "canonical_key": memory.canonical_key,
+                                        "memory_type": memory.memory_type,
+                                        "value": memory.value,
+                                        "status": memory.status,
+                                    }
+                                    if memory
+                                    else None
+                                ),
+                            },
                         )
                     yield sse_event(
                         "retrieval.trace",
@@ -199,10 +217,44 @@ def register_routes(application: FastAPI) -> None:
         ] = MemoryStatus.ACTIVE,
     ) -> MemoriesResponse:
         services = require_session(request, session_id)
+        memories = services.store.list_memories(session_id, status=memory_status)
+        events = services.store.memory_history(session_id)
+        trace = services.store.latest_retrieval(session_id)
         return MemoriesResponse(
             status=memory_status,
-            memories=services.store.list_memories(session_id, status=memory_status),
-            events=services.store.memory_history(session_id),
+            memories=[
+                MemoryInspectorItem(
+                    id=memory.id,
+                    canonical_key=memory.canonical_key,
+                    memory_type=memory.memory_type,
+                    normalized_text=memory.normalized_text,
+                    value=memory.value,
+                    status=memory.status,
+                    confidence=memory.confidence,
+                    importance=memory.importance,
+                )
+                for memory in memories
+            ],
+            events=[
+                MemoryEventItem(
+                    id=event.id,
+                    action=event.action,
+                    canonical_key=event.canonical_key,
+                    reason_code=event.reason_code,
+                    created_at=event.created_at.isoformat(),
+                )
+                for event in events
+            ],
+            trace=(
+                RetrievalInspectorTrace(
+                    algorithm_version=trace.algorithm_version,
+                    candidate_count=trace.candidate_count,
+                    selected=trace.selected,
+                    degraded_mode=trace.degraded_mode,
+                )
+                if trace
+                else None
+            ),
         )
 
     @application.delete(

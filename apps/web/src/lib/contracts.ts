@@ -20,3 +20,28 @@ export type MemorySummary = {
   confidence: number;
   importance: number;
 };
+
+export type MemoryEvent = {
+  id: string;
+  action: "add" | "update" | "supersede" | "ignore" | "extraction_failed";
+  canonical_key: string | null;
+  reason_code: string;
+  created_at: string;
+};
+
+export type RetrievalSelection = {
+  memory_id: string;
+  canonical_key: string;
+  score: number;
+  factors: Record<string, number>;
+};
+
+export type MemoryInspectorPayload = {
+  memories: MemorySummary[];
+  events: MemoryEvent[];
+  trace: {
+    selected: RetrievalSelection[];
+    candidate_count: number;
+    degraded_mode: string | null;
+  } | null;
+};

@@ -68,22 +68,28 @@ class ChatEngine:
         if len(message) > 4_000:
             raise ValueError("Message cannot exceed 4,000 characters")
 
-        user_message = self.store.append_message(
+        existing_user = (
+            self.store.get_message_by_request(session_id, request_id) if request_id else None
+        )
+        user_message = existing_user or self.store.append_message(
             session_id=session_id,
             role=MessageRole.USER,
             content=message.strip(),
             request_id=request_id,
         )
         resolutions: list[ResolutionResult] = []
-        try:
-            candidates = await self.extractor.extract(message)
-        except Exception:
-            self.store.record_event(
-                session_id=session_id,
-                source_message_id=user_message.id,
-                action=MemoryAction.EXTRACTION_FAILED,
-                reason_code="structured_extraction_failed",
-            )
+        if existing_user is None:
+            try:
+                candidates = await self.extractor.extract(message)
+            except Exception:
+                self.store.record_event(
+                    session_id=session_id,
+                    source_message_id=user_message.id,
+                    action=MemoryAction.EXTRACTION_FAILED,
+                    reason_code="structured_extraction_failed",
+                )
+                candidates = []
+        else:
             candidates = []
 
         for candidate in candidates:
