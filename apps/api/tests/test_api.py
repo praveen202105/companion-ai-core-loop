@@ -57,6 +57,7 @@ async def test_session_chat_inspection_and_permanent_reset(
     assert "event: memory.update" in chat.text
     assert "event: retrieval.trace" in chat.text
     assert "event: message.delta" in chat.text
+    assert chat.text.count("event: message.delta") > 1
     assert "event: message.completed" in chat.text
 
     replay = await api_client.post(

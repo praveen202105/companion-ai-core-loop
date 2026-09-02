@@ -26,6 +26,7 @@ from companion.api_models import (
 from companion.config import Settings, get_settings
 from companion.domain import MemoryStatus
 from companion.factory import AppServices, build_services
+from companion.memory import ResolutionResult
 from companion.observability import configure_logging, hash_session, log_event
 from companion.persona.loader import load_persona
 
@@ -145,37 +146,37 @@ def register_routes(application: FastAPI) -> None:
                             {**existing.model_dump(mode="json"), "replayed": True},
                         )
                         return
-                    result = await services.chat.turn(
+                    prepared = await services.chat.prepare_turn(
                         session_id=payload.session_id,
                         request_id=payload.request_id,
                         message=payload.message,
                     )
-                    for resolution in result.resolutions:
-                        memory = resolution.memory
+                    initial_resolution_count = len(prepared.resolutions)
+                    for resolution in prepared.resolutions:
                         yield sse_event(
                             "memory.update",
-                            {
-                                "action": resolution.action,
-                                "reason_code": resolution.reason_code,
-                                "memory": (
-                                    {
-                                        "id": str(memory.id),
-                                        "canonical_key": memory.canonical_key,
-                                        "memory_type": memory.memory_type,
-                                        "value": memory.value,
-                                        "status": memory.status,
-                                    }
-                                    if memory
-                                    else None
-                                ),
-                            },
+                            resolution_payload(resolution),
                         )
                     yield sse_event(
                         "retrieval.trace",
-                        result.retrieval.trace.model_dump(mode="json"),
+                        prepared.retrieval.trace.model_dump(mode="json"),
                     )
-                    for delta in chunk_text(result.response):
-                        yield sse_event("message.delta", {"delta": delta})
+                    buffered = services.chat.requires_buffered_stream(payload.message)
+                    draft_parts: list[str] = []
+                    async for delta in services.chat.stream_draft(prepared):
+                        draft_parts.append(delta)
+                        if not buffered:
+                            yield sse_event("message.delta", {"delta": delta})
+                    draft = "".join(draft_parts)
+                    result = await services.chat.complete_turn(prepared, draft)
+                    if buffered:
+                        for delta in chunk_text(result.response):
+                            yield sse_event("message.delta", {"delta": delta})
+                    for resolution in result.resolutions[initial_resolution_count:]:
+                        yield sse_event(
+                            "memory.update",
+                            resolution_payload(resolution),
+                        )
                     yield sse_event(
                         "message.completed",
                         result.assistant_message.model_dump(mode="json"),
@@ -384,6 +385,25 @@ async def require_internal_key(
 def sse_event(event: str, payload: Any) -> bytes:
     serialized = orjson.dumps(payload).decode("utf-8")
     return f"event: {event}\ndata: {serialized}\n\n".encode()
+
+
+def resolution_payload(resolution: ResolutionResult) -> dict[str, Any]:
+    memory = resolution.memory
+    return {
+        "action": resolution.action,
+        "reason_code": resolution.reason_code,
+        "memory": (
+            {
+                "id": str(memory.id),
+                "canonical_key": memory.canonical_key,
+                "memory_type": memory.memory_type,
+                "value": memory.value,
+                "status": memory.status,
+            }
+            if memory
+            else None
+        ),
+    }
 
 
 def chunk_text(value: str, size: int = 24) -> list[str]:

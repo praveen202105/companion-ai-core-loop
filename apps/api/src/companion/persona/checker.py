@@ -80,6 +80,10 @@ class PersonaConsistencyChecker:
         self.persona = persona
         self.store = store
 
+    def requires_buffering(self, user_message: str) -> bool:
+        """Keep identity-pressure turns private until their final draft passes the guard."""
+        return self._should_extract_claims(user_message, "")
+
     async def guard(
         self,
         *,

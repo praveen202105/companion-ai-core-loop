@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from collections.abc import AsyncIterator
+from dataclasses import dataclass
 from uuid import UUID
 
 from pydantic import BaseModel
@@ -34,6 +36,19 @@ class ChatTurnResult(BaseModel):
     retrieval: RetrievalResult
 
 
+@dataclass
+class PreparedChatTurn:
+    session_id: UUID
+    request_id: str | None
+    user_input: str
+    user_message: MessageView
+    resolutions: list[ResolutionResult]
+    retrieval: RetrievalResult
+    system: str
+    model_messages: list[dict[str, str]]
+    usage_before: dict[str, object]
+
+
 class ChatEngine:
     def __init__(
         self,
@@ -63,10 +78,29 @@ class ChatEngine:
         message: str,
         request_id: str | None = None,
     ) -> ChatTurnResult:
+        prepared = await self.prepare_turn(
+            session_id=session_id,
+            message=message,
+            request_id=request_id,
+        )
+        response = await self.provider.generate(
+            system=prepared.system,
+            messages=prepared.model_messages,
+        )
+        return await self.complete_turn(prepared, response)
+
+    async def prepare_turn(
+        self,
+        *,
+        session_id: UUID,
+        message: str,
+        request_id: str | None = None,
+    ) -> PreparedChatTurn:
         if not message.strip():
             raise ValueError("Message cannot be empty")
         if len(message) > 4_000:
             raise ValueError("Message cannot exceed 4,000 characters")
+        clean_message = message.strip()
         usage_before = self.provider.usage_snapshot()
 
         existing_user = (
@@ -75,13 +109,13 @@ class ChatEngine:
         user_message = existing_user or self.store.append_message(
             session_id=session_id,
             role=MessageRole.USER,
-            content=message.strip(),
+            content=clean_message,
             request_id=request_id,
         )
         resolutions: list[ResolutionResult] = []
         if existing_user is None:
             try:
-                candidates = await self.extractor.extract(message)
+                candidates = await self.extractor.extract(clean_message)
             except Exception:
                 self.store.record_event(
                     session_id=session_id,
@@ -108,7 +142,7 @@ class ChatEngine:
             )
 
         retrieval = self.retriever.retrieve(
-            message,
+            clean_message,
             session_id,
             top_k=6,
             message_id=user_message.id,
@@ -118,46 +152,87 @@ class ChatEngine:
         model_messages = [
             {"role": item.role.value, "content": item.content} for item in recent
         ]
-        response = await self.provider.generate(system=system, messages=model_messages)
+        return PreparedChatTurn(
+            session_id=session_id,
+            request_id=request_id,
+            user_input=clean_message,
+            user_message=user_message,
+            resolutions=resolutions,
+            retrieval=retrieval,
+            system=system,
+            model_messages=model_messages,
+            usage_before=usage_before,
+        )
+
+    async def stream_draft(self, prepared: PreparedChatTurn) -> AsyncIterator[str]:
+        async for delta in self.provider.stream(
+            system=prepared.system,
+            messages=prepared.model_messages,
+        ):
+            if delta:
+                yield delta
+
+    def requires_buffered_stream(self, user_message: str) -> bool:
+        return bool(
+            self.persona_checker
+            and self.persona_checker.requires_buffering(user_message)
+        )
+
+    async def complete_turn(
+        self,
+        prepared: PreparedChatTurn,
+        draft: str,
+    ) -> ChatTurnResult:
+        if not draft.strip():
+            raise RuntimeError("The model returned no output text")
+        response = draft
         companion_claims: list[MemoryCandidate] = []
         if self.persona_checker is not None:
             guard = await self.persona_checker.guard(
-                session_id=session_id,
+                session_id=prepared.session_id,
                 draft=response,
-                user_message=message,
+                user_message=prepared.user_input,
             )
             response = guard.response
             companion_claims = guard.claims
         usage = self.provider.usage_snapshot()
         assistant_message = self.store.append_message(
-            session_id=session_id,
+            session_id=prepared.session_id,
             role=MessageRole.ASSISTANT,
             content=response,
-            reply_to_request_id=request_id,
+            reply_to_request_id=prepared.request_id,
             model=str(usage.get("model", usage.get("provider", "unknown"))),
             prompt_version=CHAT_PROMPT_VERSION,
-            input_tokens=self._usage_delta(usage_before, usage, "input_tokens"),
-            output_tokens=self._usage_delta(usage_before, usage, "output_tokens"),
+            input_tokens=self._usage_delta(
+                prepared.usage_before,
+                usage,
+                "input_tokens",
+            ),
+            output_tokens=self._usage_delta(
+                prepared.usage_before,
+                usage,
+                "output_tokens",
+            ),
         )
         for claim in companion_claims:
             try:
                 embedding = self.embedding_provider.embed_one(claim.normalized_text)
             except Exception:
                 embedding = None
-            resolutions.append(
+            prepared.resolutions.append(
                 await self.resolver.resolve(
-                    session_id=session_id,
+                    session_id=prepared.session_id,
                     candidate=claim,
                     source_message_id=assistant_message.id,
                     embedding=embedding,
                 )
             )
         return ChatTurnResult(
-            user_message=user_message,
+            user_message=prepared.user_message,
             assistant_message=assistant_message,
             response=response,
-            resolutions=resolutions,
-            retrieval=retrieval,
+            resolutions=prepared.resolutions,
+            retrieval=prepared.retrieval,
         )
 
     def _compose_system_context(self, retrieval: RetrievalResult) -> str:

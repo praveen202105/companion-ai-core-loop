@@ -145,8 +145,13 @@ export function CompanionApp() {
     }
     if (event.event === "message.completed") {
       const id = String(event.data.id || assistantId);
+      const content = typeof event.data.content === "string" ? event.data.content : null;
       setMessages((current) =>
-        current.map((item) => (item.id === assistantId ? { ...item, id } : item)),
+        current.map((item) =>
+          item.id === assistantId
+            ? { ...item, id, content: content ?? item.content }
+            : item,
+        ),
       );
     }
     if (event.event === "error") {

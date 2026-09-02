@@ -54,6 +54,12 @@ The API adds one-active-request-per-session Redis locking and client-generated r
 A repeated completed request returns the stored assistant result; a concurrent request for the same
 session receives a retryable conflict instead of racing the memory transaction.
 
+Normal responses use provider-native deltas all the way through FastAPI SSE and the Next.js BFF.
+Identity-pressure prompts are buffered until the persona guard accepts the final text. The
+authoritative completion event can replace a streamed draft after repair, and only that accepted
+response is persisted. A failed partial stream remains visible only transiently and is removed by
+the client before an idempotent retry.
+
 ## Production boundaries
 
 ```mermaid

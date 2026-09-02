@@ -60,4 +60,37 @@ describe("Home", () => {
     expect(await screen.findByRole("dialog", { name: "Mira's memory inspector" })).toBeInTheDocument();
     expect(screen.getByText("The user's favorite drink is masala chai.")).toBeInTheDocument();
   });
+
+  it("renders streamed deltas and applies the guarded final response", async () => {
+    const encoder = new TextEncoder();
+    const stream = new ReadableStream({
+      start(controller) {
+        controller.enqueue(
+          encoder.encode('event: message.delta\ndata: {"delta":"Draft text"}\n\n'),
+        );
+        controller.enqueue(
+          encoder.encode(
+            'event: message.completed\ndata: {"id":"message-1","content":"Final text"}\n\n',
+          ),
+        );
+        controller.close();
+      },
+    });
+    vi.stubGlobal(
+      "fetch",
+      vi
+        .fn()
+        .mockResolvedValueOnce(new Response(JSON.stringify({ unlocked: true })))
+        .mockResolvedValueOnce(new Response(JSON.stringify({ ready: true, messages: [] })))
+        .mockResolvedValueOnce(new Response(stream)),
+    );
+    render(<Home />);
+
+    const composer = await screen.findByLabelText("Message Mira");
+    fireEvent.change(composer, { target: { value: "Hello" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send message" }));
+
+    expect(await screen.findByText("Final text")).toBeInTheDocument();
+    expect(screen.queryByText("Draft text")).not.toBeInTheDocument();
+  });
 });

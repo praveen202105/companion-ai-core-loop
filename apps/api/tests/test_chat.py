@@ -104,6 +104,12 @@ class BrokenExtractor:
         raise RuntimeError("model unavailable")
 
 
+class EmptyExtractor:
+    async def extract(self, text: str) -> list[MemoryCandidate]:
+        del text
+        return []
+
+
 async def test_extraction_failure_still_allows_response(
     store: SqlAlchemyMemoryStore,
 ) -> None:
@@ -162,3 +168,26 @@ async def test_memory_worthy_turn_uses_at_most_two_calls(
     await chat.turn(session_id=session_id, message="I live in Pune.")
 
     assert provider.usage_snapshot()["calls"] == 2
+
+
+async def test_prepared_turn_streams_provider_deltas_before_persisting(
+    store: SqlAlchemyMemoryStore,
+) -> None:
+    provider = FakeLLMProvider("A genuinely streamed reply.")
+    chat = engine(store, provider, extractor=EmptyExtractor())
+    session_id = store.create_session(persona_version="1.0.0")
+
+    prepared = await chat.prepare_turn(
+        session_id=session_id,
+        message="Hello there",
+        request_id="stream-request-01",
+    )
+    deltas = [delta async for delta in chat.stream_draft(prepared)]
+
+    assert len(deltas) > 1
+    assert store.get_assistant_by_request(session_id, "stream-request-01") is None
+
+    result = await chat.complete_turn(prepared, "".join(deltas))
+
+    assert result.response == "A genuinely streamed reply."
+    assert result.assistant_message.content == result.response

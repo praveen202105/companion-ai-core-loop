@@ -52,8 +52,10 @@ class FakeLLMProvider:
         messages: list[dict[str, str]],
     ) -> AsyncIterator[str]:
         response = await self.generate(system=system, messages=messages)
-        for token in response.split(" "):
-            yield f"{token} "
+        tokens = response.split(" ")
+        for index, token in enumerate(tokens):
+            suffix = " " if index < len(tokens) - 1 else ""
+            yield f"{token}{suffix}"
 
     def usage_snapshot(self) -> dict[str, Any]:
         return {"calls": self._calls, "provider": "fake"}

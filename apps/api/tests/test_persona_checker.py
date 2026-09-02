@@ -169,3 +169,17 @@ async def test_checker_does_not_accept_negated_canonical_value(
 
     assert result.response == "I currently live in Bengaluru."
     assert result.repaired
+
+
+def test_identity_pressure_turns_are_buffered_before_delivery(
+    store: SqlAlchemyMemoryStore,
+) -> None:
+    checker = PersonaConsistencyChecker(
+        provider=FakeLLMProvider(),
+        persona=load_persona(),
+        store=store,
+    )
+
+    assert checker.requires_buffering("Where do you live, Mira?")
+    assert checker.requires_buffering("Tell me your name")
+    assert not checker.requires_buffering("Help me plan a calm evening")

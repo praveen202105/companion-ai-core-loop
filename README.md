@@ -62,10 +62,12 @@ Every user turn follows a fixed order:
 2. Apply a local worthiness/privacy gate, then extract typed memory candidates only when needed.
 3. Resolve add, update, supersede, or ignore decisions.
 4. Retrieve active memories through FTS5 and 384-dimensional embeddings.
-5. Generate with Mira's versioned persona, at most six memories, and the last eight messages.
+5. Stream provider deltas with Mira's versioned persona, at most six memories, and the last eight
+   messages. Identity-pressure turns stay buffered until validation.
 6. Check explicit persona facts locally; extract stable assistant self-claims only when relevant,
-   repair a real conflict once, and use a safe fallback if needed.
-7. Persist the assistant response, companion claims, audit events, and retrieval trace.
+   repair a real conflict once, and make the completed event authoritative.
+7. Persist only the accepted assistant response, companion claims, audit events, and retrieval
+   trace; partial failed streams are never stored.
 
 No endpoint or CLI command exposes hidden chain-of-thought. `explain-last-turn` contains only
 observable candidates, decisions, selected memories, and numeric score factors.
@@ -174,6 +176,11 @@ The API surface is session-scoped:
 - `GET /v1/sessions/{id}/memories`
 - `DELETE /v1/sessions/{id}`
 - `GET /health/live` and `GET /health/ready`
+
+Normal chat turns forward Groq's real output deltas through FastAPI SSE and the Next.js BFF as they
+arrive. Identity-pressure turns are intentionally buffered until the persona guard accepts the
+final draft. `message.completed` is authoritative, so a repaired final response replaces any
+already-rendered draft without persisting contradictory content.
 
 The inspector exposes active/superseded memories, resolver events, retrieval scores, and degraded
 mode—not prompts or chain-of-thought.
