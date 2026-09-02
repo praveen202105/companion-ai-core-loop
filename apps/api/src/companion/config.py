@@ -25,6 +25,7 @@ class Settings(BaseSettings):
     groq_base_url: str = "https://api.groq.com/openai/v1"
     groq_chat_model: str = "openai/gpt-oss-120b"
     groq_extraction_model: str = "openai/gpt-oss-20b"
+    groq_judge_model: str = "openai/gpt-oss-20b"
     llm_provider: str = "fake"
     embedding_provider: str = "hash"
     internal_api_key: str = "local-internal-key-change-me"
