@@ -66,7 +66,9 @@ class EvaluationScenario(BaseModel):
 class EvaluationMetrics(BaseModel):
     persistence_accuracy: float
     recall_at_5: float
+    precision_at_1: float
     precision_at_5: float
+    mean_reciprocal_rank: float
     factual_recall_accuracy: float
     contradiction_resolution_accuracy: float
     superseded_leakage_rate: float
@@ -97,6 +99,8 @@ class EvaluationAccumulator:
         self.persistence_passed = 0
         self.retrieval_total = 0
         self.retrieval_hits = 0
+        self.top_1_hits = 0
+        self.reciprocal_rank_total = 0.0
         self.retrieved_total = 0
         self.relevant_retrieved = 0
         self.factual_total = 0
@@ -114,8 +118,12 @@ class EvaluationAccumulator:
                 self.persistence_passed, self.persistence_total
             ),
             recall_at_5=self._ratio(self.retrieval_hits, self.retrieval_total),
+            precision_at_1=self._ratio(self.top_1_hits, self.retrieval_total),
             precision_at_5=self._ratio(
                 self.relevant_retrieved, self.retrieved_total
+            ),
+            mean_reciprocal_rank=self._ratio(
+                self.reciprocal_rank_total, self.retrieval_total
             ),
             factual_recall_accuracy=self._ratio(
                 self.factual_passed, self.factual_total
@@ -133,7 +141,7 @@ class EvaluationAccumulator:
         )
 
     @staticmethod
-    def _ratio(numerator: int, denominator: int) -> float:
+    def _ratio(numerator: int | float, denominator: int) -> float:
         return numerator / denominator if denominator else 0.0
 
 
@@ -162,6 +170,10 @@ async def run_evaluation(
         "contradictions_100_percent": metrics.contradiction_resolution_accuracy == 1.0,
         "superseded_leakage_zero": metrics.superseded_leakage_rate == 0.0,
         "recall_at_5_at_least_90_percent": metrics.recall_at_5 >= 0.9,
+        "precision_at_1_at_least_90_percent": metrics.precision_at_1 >= 0.9,
+        "mean_reciprocal_rank_at_least_90_percent": (
+            metrics.mean_reciprocal_rank >= 0.9
+        ),
         "persona_contradiction_at_most_2_percent": (
             metrics.persona_contradiction_rate <= 0.02
         ),
@@ -273,9 +285,16 @@ async def _retrieval(
     retrieved = Retriever(store, embeddings).retrieve(query, session_id, top_k=5)
     values = [item.memory.value for item in retrieved.memories]
     relevant = sum(value == scenario.expected_value for value in values)
+    first_relevant_rank = next(
+        (index for index, value in enumerate(values, start=1) if value == scenario.expected_value),
+        None,
+    )
     passed = relevant > 0
     accumulator.retrieval_total += 1
     accumulator.retrieval_hits += int(passed)
+    accumulator.top_1_hits += int(first_relevant_rank == 1)
+    if first_relevant_rank is not None:
+        accumulator.reciprocal_rank_total += 1 / first_relevant_rank
     accumulator.retrieved_total += len(values)
     accumulator.relevant_retrieved += relevant
     accumulator.factual_total += 1

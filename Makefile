@@ -3,7 +3,7 @@ API_DIR := apps/api
 WEB_FILTER := @companion/web
 export PYTHONPATH := $(CURDIR)/apps/api/src
 
-.PHONY: setup lint test test-e2e demo eval dev api web cleanup
+.PHONY: setup lint test test-e2e demo eval eval-live dev api web cleanup
 
 setup:
 	uv sync --all-packages --extra dev
@@ -27,6 +27,10 @@ demo:
 
 eval:
 	uv run --package companion-ai-api companion eval
+
+eval-live:
+	@echo "Warning: this paid 52-turn Groq evaluation makes many provider requests."
+	uv run --package companion-ai-api companion eval-live
 
 dev:
 	@echo "Run 'make api' and 'make web' in separate terminals."

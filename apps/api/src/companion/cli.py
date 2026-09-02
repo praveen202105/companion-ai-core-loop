@@ -10,9 +10,10 @@ import typer
 
 from companion.config import get_settings
 from companion.domain import MemoryStatus
-from companion.evaluation import run_evaluation
+from companion.evaluation import run_evaluation, run_live_evaluation
 from companion.factory import AppServices, build_services
 from companion.persona.loader import load_persona
+from companion.providers import GroqResponsesProvider
 from companion.storage import Database, PostgresMemoryStore, SqlAlchemyMemoryStore
 
 app = typer.Typer(help="Mira companion CLI")
@@ -155,6 +156,56 @@ def eval_command(
     report = asyncio.run(run_evaluation(output_path=output))
     typer.echo(report.metrics.model_dump_json(indent=2))
     if report.failures:
+        raise typer.Exit(code=1)
+
+
+@app.command("eval-live")
+def eval_live_command(
+    output: Annotated[
+        Path,
+        typer.Option("--output", help="Path for the real-provider evaluation report"),
+    ] = Path("evals/results/groq-live-v1.json"),
+    checkpoint: Annotated[
+        Path,
+        typer.Option("--checkpoint", help="Ignored resumable live-eval checkpoint"),
+    ] = Path("data/groq-live-v1.checkpoint.json"),
+) -> None:
+    """Run the 52-turn Groq memory, persona, and tone evaluation."""
+    settings = get_settings()
+    if not settings.groq_api_key:
+        raise typer.BadParameter("GROQ_API_KEY is required")
+    chat_provider = GroqResponsesProvider(
+        api_key=settings.groq_api_key,
+        base_url=settings.groq_base_url,
+        model=settings.groq_chat_model,
+        extraction_model=settings.groq_extraction_model,
+        max_output_tokens=300,
+        extraction_max_output_tokens=800,
+    )
+    judge_provider = GroqResponsesProvider(
+        api_key=settings.groq_api_key,
+        base_url=settings.groq_base_url,
+        model=settings.groq_judge_model,
+        extraction_model=settings.groq_judge_model,
+        max_output_tokens=500,
+        extraction_max_output_tokens=1_200,
+    )
+    report = asyncio.run(
+        run_live_evaluation(
+            chat_provider=chat_provider,
+            judge_provider=judge_provider,
+            output_path=output,
+            checkpoint_path=checkpoint,
+            progress=lambda turn, total: typer.echo(f"Live eval turn {turn}/{total}"),
+            judge_progress=lambda batch, total: typer.echo(
+                f"Live eval judge batch {batch}/{total}"
+            ),
+            turn_delay_seconds=30,
+            judge_delay_seconds=60,
+        )
+    )
+    typer.echo(report.metrics.model_dump_json(indent=2))
+    if not all(report.acceptance.values()):
         raise typer.Exit(code=1)
 
 
