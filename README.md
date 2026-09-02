@@ -224,10 +224,11 @@ after the `assessment-v1.0.0` tag.
 - Account authentication, cross-device identity, mobile clients, custom domains, and billion-user
   scaling are outside this delivery's definition of production readiness.
 
-Production API, PostgreSQL/pgvector, Redis controls, the protected frontend, CI hardening, and a
-complete Railway deployment topology are implemented after the assessment tag. See the operations
-runbook for the staging-first release and the two external prerequisites: a provider key and the
-one-time pgvector extension command.
+Production API, PostgreSQL/pgvector, Redis controls, the protected frontend, CI hardening, and
+Vercel/Railway deployment artifacts are implemented after the assessment tag. The free-tier
+topology omits the scheduled cleanup service and runs retention cleanup manually. See the operations
+runbook for the release flow and the two external prerequisites: a provider key and the one-time
+pgvector extension command.
 
 ## Further reading
 

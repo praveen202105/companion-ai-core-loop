@@ -7,16 +7,18 @@ billion-user capacity. Promote the exact commit that passed CI and staging smoke
 
 | Component | Platform | Production responsibility |
 | --- | --- | --- |
-| `companion-web` | Railway Singapore | UI, passcode gate, signed session cookie, BFF |
+| `companion-ai-web` | Vercel, root `apps/web` | UI, passcode gate, signed session cookie, BFF |
 | `companion-api` | Railway Singapore | FastAPI/SSE, memory loop, rate limits, telemetry |
 | `Postgres` | Railway Singapore | PostgreSQL 18 with pinned pgvector image |
 | `Redis` | Railway Singapore | distributed locks and rate limits |
-| `companion-cleanup` | Railway Singapore | daily expired-session deletion at 02:00 UTC |
 
 Railway state is declared in `.railway/railway.ts`. The Docker image preloads
 `intfloat/multilingual-e5-small`, runs as an unprivileged user, and listens on Railway's injected
-`PORT`. A Vercel configuration remains available in `apps/web/vercel.json`, but the declared
-production topology keeps the complete demo in one Railway project.
+`PORT`. Vercel settings live in `apps/web/vercel.json`.
+
+The free-tier topology intentionally omits the scheduled cleanup service. Run the cleanup command
+manually until a cron service is restored; chat, persistence, retrieval, and rate limiting are
+otherwise unchanged.
 
 ## Required configuration
 
@@ -42,7 +44,7 @@ CHAT_RATE_LIMIT_PER_MINUTE=10
 CHAT_RATE_LIMIT_PER_DAY=100
 ```
 
-Railway `companion-web` server-side variables:
+Vercel server-side variables:
 
 ```text
 API_BASE_URL=https://the-environment-api-host
@@ -86,8 +88,8 @@ and production.
    railway config apply
    ```
 
-   The plan must contain only the web app, API, cleanup job, Postgres, Redis, their variables, and
-   intended Singapore placement. Stop if it proposes deleting an unrelated resource.
+   The plan must contain only the API, Postgres, Redis, their variables, and intended Singapore
+   placement. Stop if it proposes deleting an unrelated resource.
 
 4. Populate the preserved secrets through Railway's sealed-variable UI or stdin-capable CLI flow.
    Configure the API's generated Railway domain. Do not deploy a source commit containing secrets.
@@ -108,8 +110,8 @@ and production.
 6. Deploy the API. Its pre-deploy command runs `alembic upgrade head`; a non-zero exit prevents the
    new deployment from replacing the old one. Wait for `/health/ready` to return HTTP 200.
 
-7. Configure the Railway web variables with the staging API URL and staging secrets, generate its
-   domain, and deploy `companion-web`.
+7. Configure the Vercel Preview variables with the staging API URL and staging secrets, then deploy
+   a preview of `apps/web`.
 
 8. Run the full smoke path:
 
@@ -126,8 +128,8 @@ and production.
 
 Repeat the pgvector one-time command and read-only verification in the production database. Apply
 the production Railway plan, configure production-only secrets, deploy the API, and wait for ready.
-Point the Railway web service at the production API, deploy from `main`, and repeat every smoke test
-above. Only then create and push `product-v1.0.0`.
+Point Vercel Production variables at the production API, deploy from `main`, and repeat every smoke
+test above. Only then create and push `product-v1.0.0`.
 
 The supported release order is:
 
@@ -144,11 +146,12 @@ CI green → staging data prerequisites → staging migration/deploy → staging
   conflicts, and cleanup failures.
 - Review Railway CPU, memory, HTTP latency, and bounded logs after each release. The local embedding
   model makes memory usage materially higher than the hash provider used by tests.
-- Confirm `companion-cleanup` exits successfully each day and logs the deleted session count.
+- Until the cron service is restored, periodically run `companion cleanup` from an API shell and
+  confirm the deleted-session count in the logs.
 - Enable Railway database backups before production data is accepted and periodically test restore
   into a non-production environment.
 - Rotate the demo passcode and cookie signing secret together when access should be revoked. Rotate
-  `INTERNAL_API_KEY` on the Railway API and web services as one coordinated change.
+  `INTERNAL_API_KEY` in Railway and Vercel as one coordinated change.
 
 ## Failure and recovery playbooks
 
