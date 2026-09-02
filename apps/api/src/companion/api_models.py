@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Literal
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -20,11 +20,30 @@ class ChatRequest(BaseModel):
     message: str = Field(min_length=1, max_length=4_000)
 
 
+class UserChatRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    request_id: str = Field(min_length=8, max_length=80, pattern=r"^[A-Za-z0-9._:-]+$")
+    message: str = Field(min_length=1, max_length=4_000)
+
+
+class AuthenticatedPrincipal(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    auth_provider: Literal["google"]
+    auth_subject: str = Field(min_length=1, max_length=255)
+
+
 class SessionResponse(BaseModel):
     session: SessionView
 
 
 class MessagesResponse(BaseModel):
+    messages: list[MessageView]
+
+
+class UserSessionResponse(BaseModel):
+    session: SessionView
     messages: list[MessageView]
 
 

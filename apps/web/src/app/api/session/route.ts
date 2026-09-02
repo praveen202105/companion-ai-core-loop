@@ -1,63 +1,27 @@
-import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
 
-import { isUnlocked } from "@/lib/server/auth";
 import { backendFetch } from "@/lib/server/backend";
-import { getSessionId } from "@/lib/server/session";
-import { cookieOptions, SESSION_COOKIE, signToken } from "@/lib/server/tokens";
+import { getAuthenticatedPrincipal } from "@/lib/server/principal";
 
 export const runtime = "nodejs";
 
 export async function POST() {
-  if (!(await isUnlocked())) {
-    return NextResponse.json({ error: "Locked" }, { status: 401 });
+  const principal = await getAuthenticatedPrincipal();
+  if (!principal) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const upstream = await backendFetch("/v1/me/session", { method: "POST" }, principal);
+  if (!upstream.ok) {
+    return NextResponse.json({ error: "Companion service unavailable" }, { status: 502 });
   }
-  let sessionId = await getSessionId();
-  let messages: unknown[] = [];
-  if (sessionId) {
-    const existing = await backendFetch(`/v1/sessions/${sessionId}/messages`);
-    if (existing.ok) {
-      const body = (await existing.json()) as { messages: unknown[] };
-      messages = body.messages;
-    } else if (existing.status === 404) {
-      sessionId = null;
-    } else {
-      return NextResponse.json({ error: "Companion service unavailable" }, { status: 502 });
-    }
-  }
-  if (!sessionId) {
-    const created = await backendFetch("/v1/sessions", { method: "POST" });
-    if (!created.ok) {
-      return NextResponse.json({ error: "Could not start a session" }, { status: 502 });
-    }
-    const body = (await created.json()) as {
-      session: { id: string; expires_at: string };
-    };
-    sessionId = body.session.id;
-    const maxAge = 60 * 60 * 24 * 30;
-    const token = signToken({
-      kind: "session",
-      sessionId,
-      exp: Date.now() + maxAge * 1_000,
-    });
-    const store = await cookies();
-    store.set(SESSION_COOKIE, token, cookieOptions(maxAge));
-  }
-  return NextResponse.json({ ready: true, messages });
+  const body = (await upstream.json()) as { messages: unknown[] };
+  return NextResponse.json({ ready: true, messages: body.messages });
 }
 
 export async function DELETE() {
-  if (!(await isUnlocked())) {
-    return NextResponse.json({ error: "Locked" }, { status: 401 });
+  const principal = await getAuthenticatedPrincipal();
+  if (!principal) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  const reset = await backendFetch("/v1/me/session/reset", { method: "POST" }, principal);
+  if (!reset.ok) {
+    return NextResponse.json({ error: "Could not reset session" }, { status: 502 });
   }
-  const sessionId = await getSessionId();
-  if (sessionId) {
-    const deleted = await backendFetch(`/v1/sessions/${sessionId}`, { method: "DELETE" });
-    if (!deleted.ok && deleted.status !== 404) {
-      return NextResponse.json({ error: "Could not reset session" }, { status: 502 });
-    }
-  }
-  const store = await cookies();
-  store.delete(SESSION_COOKIE);
-  return NextResponse.json({ deleted: true });
+  return NextResponse.json({ deleted: true, messages: [] });
 }

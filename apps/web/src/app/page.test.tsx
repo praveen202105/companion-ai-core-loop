@@ -1,7 +1,21 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
+import { CompanionApp } from "@/components/companion-app";
+import { getAuthenticatedPrincipal } from "@/lib/server/principal";
+
 import Home from "./page";
+
+vi.mock("@/lib/server/principal", () => ({
+  getAuthenticatedPrincipal: vi.fn(),
+}));
+
+vi.mock("@/app/actions", () => ({
+  signInWithGoogle: vi.fn(),
+  signOutOfMira: vi.fn(),
+}));
+
+const user = { name: "Praveen", email: "praveen@example.com", image: null };
 
 describe("Home", () => {
   afterEach(() => {
@@ -9,20 +23,13 @@ describe("Home", () => {
     vi.unstubAllGlobals();
   });
 
-  it("shows the protected companion experience", async () => {
-    vi.stubGlobal(
-      "fetch",
-      vi.fn().mockResolvedValue(
-        new Response(JSON.stringify({ unlocked: false }), {
-          headers: { "Content-Type": "application/json" },
-        }),
-      ),
-    );
-    render(<Home />);
-    expect(
-      await screen.findByRole("heading", { name: "Mira remembers what matters." }),
-    ).toBeInTheDocument();
-    expect(screen.getByLabelText("Demo passcode")).toBeInTheDocument();
+  it("shows Google sign-in when there is no authenticated user", async () => {
+    vi.mocked(getAuthenticatedPrincipal).mockResolvedValue(null);
+
+    render(await Home());
+
+    expect(screen.getByRole("heading", { name: "Mira remembers what matters." })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Continue with Google" })).toBeInTheDocument();
   });
 
   it("opens the inspectable memory drawer", async () => {
@@ -30,7 +37,6 @@ describe("Home", () => {
       "fetch",
       vi
         .fn()
-        .mockResolvedValueOnce(new Response(JSON.stringify({ unlocked: true })))
         .mockResolvedValueOnce(new Response(JSON.stringify({ ready: true, messages: [] })))
         .mockResolvedValueOnce(
           new Response(
@@ -53,7 +59,7 @@ describe("Home", () => {
           ),
         ),
     );
-    render(<Home />);
+    render(<CompanionApp user={user} />);
 
     fireEvent.click(await screen.findByRole("button", { name: "Open memory inspector" }));
 
@@ -80,11 +86,10 @@ describe("Home", () => {
       "fetch",
       vi
         .fn()
-        .mockResolvedValueOnce(new Response(JSON.stringify({ unlocked: true })))
         .mockResolvedValueOnce(new Response(JSON.stringify({ ready: true, messages: [] })))
         .mockResolvedValueOnce(new Response(stream)),
     );
-    render(<Home />);
+    render(<CompanionApp user={user} />);
 
     const composer = await screen.findByLabelText("Message Mira");
     fireEvent.change(composer, { target: { value: "Hello" } });
@@ -92,5 +97,17 @@ describe("Home", () => {
 
     expect(await screen.findByText("Final text")).toBeInTheDocument();
     expect(screen.queryByText("Draft text")).not.toBeInTheDocument();
+  });
+
+  it("shows the authenticated account in the chat header", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(new Response(JSON.stringify({ ready: true, messages: [] }))),
+    );
+
+    render(<CompanionApp user={user} />);
+
+    expect(await screen.findByText("praveen@example.com")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Sign out" })).toBeInTheDocument();
   });
 });

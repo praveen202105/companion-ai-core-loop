@@ -27,7 +27,7 @@ class RequestGuard(Protocol):
         self,
         *,
         ip_address: str,
-        session_id: UUID,
+        user_id: UUID,
     ) -> RateLimitDecision: ...
 
     def session_lock(self, session_id: UUID) -> Any: ...
@@ -49,14 +49,14 @@ class LocalRequestGuard:
         self,
         *,
         ip_address: str,
-        session_id: UUID,
+        user_id: UUID,
     ) -> RateLimitDecision:
         now = time.monotonic()
         minute_key = self._hash(ip_address)
         window = self._minute[minute_key]
         while window and window[0] <= now - 60:
             window.popleft()
-        day_key = (str(session_id), datetime.now(UTC).date().isoformat())
+        day_key = (str(user_id), datetime.now(UTC).date().isoformat())
         daily_count = self._daily[day_key]
         if len(window) >= self.per_minute or daily_count >= self.per_day:
             retry_after = max(1, int(60 - (now - window[0]))) if window else 86_400
@@ -128,7 +128,7 @@ class RedisRequestGuard:
         self,
         *,
         ip_address: str,
-        session_id: UUID,
+        user_id: UUID,
     ) -> RateLimitDecision:
         ip_hash = hashlib.sha256(ip_address.encode()).hexdigest()[:24]
         day = datetime.now(UTC).date().isoformat()
@@ -138,7 +138,7 @@ class RedisRequestGuard:
                 self.RATE_SCRIPT,
                 2,
                 f"rate:minute:{ip_hash}",
-                f"rate:day:{session_id}:{day}",
+                f"rate:day:{user_id}:{day}",
             ),
         )
         minute, daily, ttl = [int(value) for value in result]

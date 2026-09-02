@@ -33,6 +33,7 @@ export default defineConfig({
         INTERNAL_API_KEY: "e2e-internal-key",
         LLM_PROVIDER: "fake",
         EMBEDDING_PROVIDER: "hash",
+        ENABLE_ANONYMOUS_API: "false",
       },
     },
     {
@@ -44,8 +45,8 @@ export default defineConfig({
         PATH: executablePath,
         API_BASE_URL: "http://127.0.0.1:8100",
         INTERNAL_API_KEY: "e2e-internal-key",
-        DEMO_PASSCODE: "companion-demo",
-        COOKIE_SIGNING_SECRET: "e2e-cookie-signing-secret-123456789",
+        AUTH_SECRET: "e2e-auth-secret-with-at-least-thirty-two-characters",
+        E2E_AUTH_BYPASS: "true",
       },
     },
   ],

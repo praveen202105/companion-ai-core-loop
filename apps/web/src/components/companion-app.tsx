@@ -1,13 +1,14 @@
 "use client";
 
-import { FormEvent, KeyboardEvent, useCallback, useEffect, useRef, useState } from "react";
+import { KeyboardEvent, useCallback, useEffect, useRef, useState } from "react";
 
-import type { ChatMessage, MemoryInspectorPayload, SSEEvent } from "@/lib/contracts";
+import { signOutOfMira } from "@/app/actions";
+import type { ChatMessage, CompanionUser, MemoryInspectorPayload, SSEEvent } from "@/lib/contracts";
 import { consumeSSE } from "@/lib/sse";
 
-type AppState = "loading" | "locked" | "ready" | "unavailable";
+type AppState = "loading" | "ready" | "unavailable";
 
-export function CompanionApp() {
+export function CompanionApp({ user }: { user: CompanionUser }) {
   const [appState, setAppState] = useState<AppState>("loading");
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [sending, setSending] = useState(false);
@@ -30,12 +31,6 @@ export function CompanionApp() {
 
   const bootstrap = useCallback(async () => {
     try {
-      const status = await fetch("/api/auth/status", { cache: "no-store" });
-      const body = (await status.json()) as { unlocked: boolean };
-      if (!body.unlocked) {
-        setAppState("locked");
-        return;
-      }
       await initializeSession();
     } catch {
       setAppState("unavailable");
@@ -52,15 +47,6 @@ export function CompanionApp() {
       viewport.current.scrollTo({ top: viewport.current.scrollHeight, behavior: "smooth" });
     }
   }, [messages]);
-
-  async function unlocked() {
-    setAppState("loading");
-    try {
-      await initializeSession();
-    } catch {
-      setAppState("unavailable");
-    }
-  }
 
   async function sendMessage(message: string, requestId = crypto.randomUUID()) {
     if (sending) return;
@@ -160,7 +146,6 @@ export function CompanionApp() {
   }
 
   if (appState === "loading") return <LoadingScreen />;
-  if (appState === "locked") return <UnlockScreen onUnlocked={unlocked} />;
   if (appState === "unavailable") {
     return (
       <StatusScreen
@@ -196,6 +181,18 @@ export function CompanionApp() {
               <SparkIcon />
               <span>{inspector?.memories.length ? `${inspector.memories.length} memories` : "memory"}</span>
             </button>
+            <div className="user-chip" title={user.email || user.name || "Google account"}>
+              <span>{initials(user.name || user.email)}</span>
+              <div>
+                <b>{user.name || "Google user"}</b>
+                <small>{user.email}</small>
+              </div>
+            </div>
+            <form action={signOutOfMira}>
+              <button className="sign-out-action" type="submit" aria-label="Sign out">
+                Sign out
+              </button>
+            </form>
           </div>
         </header>
 
@@ -237,70 +234,6 @@ export function CompanionApp() {
           onConfirm={() => void resetSession()}
         />
       ) : null}
-    </main>
-  );
-}
-
-function UnlockScreen({ onUnlocked }: { onUnlocked: () => void }) {
-  const [passcode, setPasscode] = useState("");
-  const [error, setError] = useState<string | null>(null);
-  const [submitting, setSubmitting] = useState(false);
-
-  async function submit(event: FormEvent) {
-    event.preventDefault();
-    setSubmitting(true);
-    setError(null);
-    try {
-      const response = await fetch("/api/auth/unlock", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ passcode }),
-      });
-      if (!response.ok) {
-        const body = (await response.json()) as { error?: string };
-        throw new Error(body.error || "That passcode did not match.");
-      }
-      onUnlocked();
-    } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Could not unlock this demo.");
-    } finally {
-      setSubmitting(false);
-    }
-  }
-
-  return (
-    <main className="unlock-shell">
-      <div className="unlock-grain" />
-      <section className="unlock-card">
-        <MiraMark large />
-        <p className="eyebrow">A small, thoughtful space</p>
-        <h1>Mira remembers<br />what matters.</h1>
-        <p className="unlock-copy">
-          A steady companion with a long memory and a consistent point of view. This private demo
-          needs the shared passcode.
-        </p>
-        <form onSubmit={submit} className="unlock-form">
-          <label htmlFor="passcode">Demo passcode</label>
-          <div className="unlock-input-row">
-            <input
-              id="passcode"
-              name="passcode"
-              type="password"
-              autoComplete="current-password"
-              value={passcode}
-              onChange={(event) => setPasscode(event.target.value)}
-              placeholder="Enter passcode"
-              required
-              autoFocus
-            />
-            <button type="submit" disabled={submitting || !passcode} aria-label="Unlock Mira">
-              {submitting ? <span className="spinner" /> : <ArrowIcon />}
-            </button>
-          </div>
-          {error ? <p className="form-error" role="alert">{error}</p> : null}
-        </form>
-        <p className="unlock-footnote">Your session expires automatically after 30 days.</p>
-      </section>
     </main>
   );
 }
@@ -522,6 +455,12 @@ function InspectorEmpty() {
 function friendlyKey(key: string | null) {
   if (!key) return "No canonical memory changed";
   return key.split(":").slice(2).join(" · ").replaceAll("_", " ");
+}
+
+function initials(value: string | null) {
+  if (!value) return "G";
+  const parts = value.trim().split(/\s+/).filter(Boolean);
+  return parts.slice(0, 2).map((part) => part[0]?.toUpperCase()).join("") || "G";
 }
 
 function LoadingScreen() {

@@ -5,6 +5,12 @@ export type ChatMessage = {
   created_at: string;
 };
 
+export type CompanionUser = {
+  name: string | null;
+  email: string | null;
+  image: string | null;
+};
+
 export type SSEEvent = {
   event: string;
   data: Record<string, unknown>;

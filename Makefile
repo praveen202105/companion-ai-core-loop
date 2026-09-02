@@ -39,7 +39,7 @@ api:
 	uv run --package companion-ai-api uvicorn companion.api:app --reload --port 8000
 
 web:
-	pnpm --filter $(WEB_FILTER) dev
+	set -a; [ ! -f .env ] || . ./.env; set +a; pnpm --filter $(WEB_FILTER) dev
 
 cleanup:
 	uv run --package companion-ai-api companion cleanup

@@ -14,6 +14,7 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from sqlalchemy import text
 
 from companion.api_models import (
+    AuthenticatedPrincipal,
     ChatRequest,
     HealthResponse,
     MemoriesResponse,
@@ -22,6 +23,8 @@ from companion.api_models import (
     MessagesResponse,
     RetrievalInspectorTrace,
     SessionResponse,
+    UserChatRequest,
+    UserSessionResponse,
 )
 from companion.config import Settings, get_settings
 from companion.domain import MemoryStatus
@@ -54,7 +57,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         allow_origins=configured.cors_origins,
         allow_credentials=True,
         allow_methods=["GET", "POST", "DELETE"],
-        allow_headers=["Content-Type", "X-Internal-API-Key", "X-Request-ID"],
+        allow_headers=[
+            "Content-Type",
+            "X-Auth-Provider",
+            "X-Auth-Subject",
+            "X-Internal-API-Key",
+            "X-Request-ID",
+        ],
     )
     register_middleware(application)
     register_routes(application)
@@ -66,7 +75,7 @@ def register_routes(application: FastAPI) -> None:
         "/v1/sessions",
         response_model=SessionResponse,
         status_code=status.HTTP_201_CREATED,
-        dependencies=[Depends(require_internal_key)],
+        dependencies=[Depends(require_internal_key), Depends(require_anonymous_api)],
     )
     async def create_session(request: Request) -> SessionResponse:
         services = get_services(request)
@@ -80,8 +89,27 @@ def register_routes(application: FastAPI) -> None:
         return SessionResponse(session=session)
 
     @application.post(
+        "/v1/me/session",
+        response_model=UserSessionResponse,
+    )
+    async def user_session(
+        request: Request,
+        principal: Annotated[AuthenticatedPrincipal, Depends(require_principal)],
+    ) -> UserSessionResponse:
+        services = get_services(request)
+        _, session = services.store.get_or_create_user_session(
+            auth_provider=principal.auth_provider,
+            auth_subject=principal.auth_subject,
+            persona_version=load_persona().version,
+        )
+        return UserSessionResponse(
+            session=session,
+            messages=services.store.list_messages(session.id),
+        )
+
+    @application.post(
         "/v1/chat",
-        dependencies=[Depends(require_internal_key)],
+        dependencies=[Depends(require_internal_key), Depends(require_anonymous_api)],
         response_class=StreamingResponse,
     )
     async def chat(payload: ChatRequest, request: Request) -> StreamingResponse:
@@ -104,9 +132,14 @@ def register_routes(application: FastAPI) -> None:
                 )
                 return
             client_ip = request.client.host if request.client else "unknown"
+            rate_identity: UUID = getattr(
+                request.state,
+                "rate_identity",
+                payload.session_id,
+            )
             limit = await services.request_guard.check_rate_limit(
                 ip_address=client_ip,
-                session_id=payload.session_id,
+                user_id=rate_identity,
             )
             if not limit.allowed:
                 yield sse_event(
@@ -184,6 +217,7 @@ def register_routes(application: FastAPI) -> None:
                     log_event(
                         "chat_completed",
                         request_id=payload.request_id,
+                        user_hash=hash_session(rate_identity),
                         session_hash=hash_session(payload.session_id),
                         latency_ms=round((time.perf_counter() - started) * 1_000, 2),
                         model=result.assistant_message.model,
@@ -196,6 +230,7 @@ def register_routes(application: FastAPI) -> None:
                 log_event(
                     "chat_failed",
                     request_id=payload.request_id,
+                    user_hash=hash_session(rate_identity),
                     session_hash=hash_session(payload.session_id),
                     latency_ms=round((time.perf_counter() - started) * 1_000, 2),
                     error_type=type(error).__name__,
@@ -218,10 +253,35 @@ def register_routes(application: FastAPI) -> None:
             },
         )
 
+    @application.post(
+        "/v1/me/chat",
+        response_class=StreamingResponse,
+    )
+    async def user_chat(
+        payload: UserChatRequest,
+        request: Request,
+        principal: Annotated[AuthenticatedPrincipal, Depends(require_principal)],
+    ) -> StreamingResponse:
+        services = get_services(request)
+        user, session = services.store.get_or_create_user_session(
+            auth_provider=principal.auth_provider,
+            auth_subject=principal.auth_subject,
+            persona_version=load_persona().version,
+        )
+        request.state.rate_identity = user.id
+        return await chat(
+            ChatRequest(
+                session_id=session.id,
+                request_id=payload.request_id,
+                message=payload.message,
+            ),
+            request,
+        )
+
     @application.get(
         "/v1/sessions/{session_id}/messages",
         response_model=MessagesResponse,
-        dependencies=[Depends(require_internal_key)],
+        dependencies=[Depends(require_internal_key), Depends(require_anonymous_api)],
     )
     async def messages(session_id: UUID, request: Request) -> MessagesResponse:
         services = require_session(request, session_id)
@@ -230,7 +290,7 @@ def register_routes(application: FastAPI) -> None:
     @application.get(
         "/v1/sessions/{session_id}/memories",
         response_model=MemoriesResponse,
-        dependencies=[Depends(require_internal_key)],
+        dependencies=[Depends(require_internal_key), Depends(require_anonymous_api)],
     )
     async def memories(
         session_id: UUID,
@@ -281,15 +341,69 @@ def register_routes(application: FastAPI) -> None:
             ),
         )
 
+    @application.get(
+        "/v1/me/memories",
+        response_model=MemoriesResponse,
+    )
+    async def user_memories(
+        request: Request,
+        principal: Annotated[AuthenticatedPrincipal, Depends(require_principal)],
+        memory_status: Annotated[
+            MemoryStatus,
+            Query(alias="status"),
+        ] = MemoryStatus.ACTIVE,
+    ) -> MemoriesResponse:
+        services = get_services(request)
+        _, session = services.store.get_or_create_user_session(
+            auth_provider=principal.auth_provider,
+            auth_subject=principal.auth_subject,
+            persona_version=load_persona().version,
+        )
+        return await memories(session.id, request, memory_status)
+
     @application.delete(
         "/v1/sessions/{session_id}",
         status_code=status.HTTP_204_NO_CONTENT,
-        dependencies=[Depends(require_internal_key)],
+        dependencies=[Depends(require_internal_key), Depends(require_anonymous_api)],
     )
     async def delete_session(session_id: UUID, request: Request) -> Response:
         services = require_session(request, session_id)
         services.store.delete_session(session_id)
         return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+    @application.post(
+        "/v1/me/session/reset",
+        response_model=UserSessionResponse,
+    )
+    async def reset_user_session(
+        request: Request,
+        principal: Annotated[AuthenticatedPrincipal, Depends(require_principal)],
+    ) -> UserSessionResponse:
+        services = get_services(request)
+        existing = services.store.get_user_session(
+            auth_provider=principal.auth_provider,
+            auth_subject=principal.auth_subject,
+        )
+        if existing is None:
+            _, session = services.store.get_or_create_user_session(
+                auth_provider=principal.auth_provider,
+                auth_subject=principal.auth_subject,
+                persona_version=load_persona().version,
+            )
+            return UserSessionResponse(session=session, messages=[])
+
+        async with services.request_guard.session_lock(existing[1].id) as acquired:
+            if not acquired:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail="A chat request is already active for this user",
+                )
+            _, session = services.store.reset_user_session(
+                auth_provider=principal.auth_provider,
+                auth_subject=principal.auth_subject,
+                persona_version=load_persona().version,
+            )
+        return UserSessionResponse(session=session, messages=[])
 
     @application.get("/health/live", response_model=HealthResponse)
     async def live() -> HealthResponse:
@@ -380,6 +494,28 @@ async def require_internal_key(
     expected = get_api_settings(request).internal_api_key
     if internal_key is None or not hmac.compare_digest(internal_key, expected):
         raise HTTPException(status_code=401, detail="Invalid internal API key")
+
+
+async def require_anonymous_api(request: Request) -> None:
+    if not get_api_settings(request).enable_anonymous_api:
+        raise HTTPException(status_code=404, detail="Not found")
+
+
+async def require_principal(
+    request: Request,
+    _internal_key: Annotated[None, Depends(require_internal_key)],
+    auth_provider: Annotated[str | None, Header(alias="X-Auth-Provider")] = None,
+    auth_subject: Annotated[str | None, Header(alias="X-Auth-Subject")] = None,
+) -> AuthenticatedPrincipal:
+    if auth_provider != "google" or auth_subject is None:
+        raise HTTPException(status_code=401, detail="Authenticated Google user required")
+    clean_subject = auth_subject.strip()
+    if not clean_subject or len(clean_subject) > 255:
+        raise HTTPException(status_code=401, detail="Invalid authenticated user")
+    return AuthenticatedPrincipal(
+        auth_provider="google",
+        auth_subject=clean_subject,
+    )
 
 
 def sse_event(event: str, payload: Any) -> bytes:

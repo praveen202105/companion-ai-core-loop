@@ -11,9 +11,9 @@ async def test_local_rate_limits_match_production_defaults() -> None:
     guard = LocalRequestGuard(per_minute=2, per_day=10)
     session_id = uuid4()
 
-    first = await guard.check_rate_limit(ip_address="127.0.0.1", session_id=session_id)
-    second = await guard.check_rate_limit(ip_address="127.0.0.1", session_id=session_id)
-    blocked = await guard.check_rate_limit(ip_address="127.0.0.1", session_id=session_id)
+    first = await guard.check_rate_limit(ip_address="127.0.0.1", user_id=session_id)
+    second = await guard.check_rate_limit(ip_address="127.0.0.1", user_id=session_id)
+    blocked = await guard.check_rate_limit(ip_address="127.0.0.1", user_id=session_id)
 
     assert first.allowed and second.allowed
     assert not blocked.allowed
@@ -47,8 +47,8 @@ async def test_redis_rate_limit_and_distributed_lock() -> None:
     session_id = uuid4()
     ip = f"ci-{uuid4()}"
 
-    first = await guard.check_rate_limit(ip_address=ip, session_id=session_id)
-    blocked = await guard.check_rate_limit(ip_address=ip, session_id=session_id)
+    first = await guard.check_rate_limit(ip_address=ip, user_id=session_id)
+    blocked = await guard.check_rate_limit(ip_address=ip, user_id=session_id)
     async with (
         guard.session_lock(session_id) as acquired,
         guard.session_lock(session_id) as second_acquired,

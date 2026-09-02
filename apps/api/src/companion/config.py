@@ -33,6 +33,7 @@ class Settings(BaseSettings):
     session_retention_days: int = Field(default=30, ge=1, le=365)
     chat_rate_limit_per_minute: int = Field(default=10, ge=1)
     chat_rate_limit_per_day: int = Field(default=100, ge=1)
+    enable_anonymous_api: bool = True
 
     @field_validator("database_url")
     @classmethod
