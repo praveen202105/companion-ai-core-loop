@@ -40,9 +40,10 @@ tests. A new paid live run is intentionally not triggered automatically.
 
 ```mermaid
 flowchart LR
-    Browser --> BFF[Next.js BFF + signed HttpOnly cookie]
+    Browser --> BFF[Next.js BFF + Auth.js]
+    BFF --> Google[Google OAuth]
     CLI[CLI] --> Turn[Chat turn orchestrator]
-    BFF --> API[FastAPI + SSE]
+    BFF -->|internal key + Google subject| API[FastAPI + SSE]
     API --> Turn
     Turn --> Extract[Structured memory extraction]
     Extract --> Resolve[Canonical resolver]
@@ -93,6 +94,7 @@ Prerequisites are Node.js 24 LTS, pnpm, Python 3.12, and
 
 ```bash
 nvm use
+cp .env.example .env
 make setup
 make lint
 make test
@@ -163,19 +165,28 @@ make api
 make web
 ```
 
-Open `http://localhost:3000` and use the development passcode from `.env` (the example is
-`companion-demo`). The browser talks only to same-origin Next.js route handlers. The BFF signs the
-anonymous session into an HttpOnly cookie and calls FastAPI with `INTERNAL_API_KEY`; backend
-credentials are never placed in the client bundle.
+Open `http://localhost:3000` and continue with a verified Google account. Configure a Google OAuth
+web client with `http://localhost:3000/api/auth/callback/google` as an authorized redirect URI,
+then set `AUTH_SECRET`, `AUTH_GOOGLE_ID`, and `AUTH_GOOGLE_SECRET` in the untracked `.env`. Auth.js
+keeps an encrypted JWT session in its HttpOnly cookie; no Auth.js database adapter or persisted
+Google access/refresh token is used.
 
-The API surface is session-scoped:
+The browser talks only to same-origin Next.js route handlers. On every request the BFF validates the
+Auth.js session and calls FastAPI with `INTERNAL_API_KEY`, `X-Auth-Provider: google`, and the verified
+immutable Google subject. Browser-supplied identity headers are ignored. Each subject maps to one
+persistent conversation, so signing into the same account on another browser restores the same
+messages and memories.
 
-- `POST /v1/sessions`
-- `POST /v1/chat` with SSE events and a client-generated `request_id`
-- `GET /v1/sessions/{id}/messages`
-- `GET /v1/sessions/{id}/memories`
-- `DELETE /v1/sessions/{id}`
+The production API surface is user-scoped:
+
+- `POST /v1/me/session` — upsert the user, get/create the continuing session, and return messages
+- `POST /v1/me/chat` — SSE chat with a client-generated `request_id`
+- `GET /v1/me/memories`
+- `POST /v1/me/session/reset` — permanently delete the old session tree and create an empty session
 - `GET /health/live` and `GET /health/ready`
+
+The original session-ID endpoints remain configuration-gated for CLI/evaluation compatibility.
+Set `ENABLE_ANONYMOUS_API=false` in production.
 
 Normal chat turns forward Groq's real output deltas through FastAPI SSE and the Next.js BFF as they
 arrive. Identity-pressure turns are intentionally buffered until the persona guard accepts the
@@ -228,14 +239,14 @@ after the `assessment-v1.0.0` tag.
 - The committed paid-provider report is a failed diagnostic from before the latest fixes. Subjective
   tone remains unaccepted until a deliberately budgeted live rerun passes; deterministic assertions
   do not imply a tone score.
-- Account authentication, cross-device identity, mobile clients, custom domains, and billion-user
+- Multiple chat threads, mobile clients, custom domains, account administration, and billion-user
   scaling are outside this delivery's definition of production readiness.
 
 Production API, PostgreSQL/pgvector, Redis controls, the protected frontend, and CI hardening are
 implemented after the assessment tag. The current card-free topology uses Vercel for web and API,
 Neon for PostgreSQL/pgvector, and Upstash for Redis; the Railway definition remains an optional
-container deployment. The free topology omits the scheduled cleanup service and runs retention
-cleanup manually. See the operations runbook for the release flow.
+container deployment. Authenticated sessions do not expire; manual retention cleanup affects only
+legacy anonymous sessions. See the operations runbook for the OAuth and release flow.
 
 ## Further reading
 

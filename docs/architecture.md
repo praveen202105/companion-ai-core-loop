@@ -64,28 +64,41 @@ the client before an idempotent retry.
 
 ```mermaid
 flowchart LR
-    U[Browser] -->|same origin| W[Next.js on Vercel]
-    W -->|INTERNAL_API_KEY| A[FastAPI on Vercel]
+    U[Browser] -->|same origin + Auth.js cookie| W[Next.js on Vercel]
+    W -->|OAuth authorization code| G[Google OAuth]
+    W -->|internal key + verified Google subject| A[FastAPI on Vercel]
     A --> P[(Neon PostgreSQL + pgvector)]
     A --> R[(Upstash Redis)]
     A --> X[Groq Responses API]
 ```
 
-The browser receives only a signed, Secure, HttpOnly, SameSite=Lax session cookie. Next.js is the
-backend-for-frontend and holds both the API URL and internal API key server-side. FastAPI limits
-messages to 4,000 characters, applies per-IP and per-session limits, serializes turns per session,
-and redacts conversation content from structured logs.
+Auth.js uses stateless encrypted JWT sessions and requests only `openid email profile` from Google.
+Only profiles with `email_verified=true` are accepted. Google access and refresh tokens are not
+persisted, and the immutable Google `sub`—never email—is the backend identity. Next.js is the
+backend-for-frontend and holds the API URL and internal API key server-side. It validates the Auth.js
+session before adding identity headers, which FastAPI trusts only with the internal key.
+
+The `users` table has a unique `(auth_provider, auth_subject)` identity and each authenticated user
+has exactly one persistent session. Concurrent first login uses a transactional upsert/get-or-create
+path. Authenticated sessions have no expiry; logout changes no application data. Reset cascades only
+the current user's session tree and creates a fresh empty session in the same transaction. Legacy
+anonymous sessions retain expiry and are never automatically attached to a Google account.
+
+FastAPI limits messages to 4,000 characters, applies per-IP and stable-user daily limits, serializes
+turns per session, and redacts conversation content from structured logs. A new chat cannot bypass
+the daily quota because its key is the durable user UUID rather than the replaced session UUID.
 
 The free production demo runs both web and API functions in Vercel's Singapore region, with Neon
 PostgreSQL/pgvector and Upstash Redis in Singapore. Alembic is run as an explicit release gate before
 deployment. Readiness checks configuration, PostgreSQL, Redis, and the vector extension without
 spending a Groq request. Expired sessions are removed manually with the cleanup CLI while the free
-topology intentionally has no dedicated cron service.
+topology intentionally has no dedicated cron service; NULL-expiry authenticated sessions are never
+selected by cleanup.
 
 ## Security and privacy posture
 
 Memory text is treated as untrusted data and delimited separately from system instructions. Normal
-logs include request ID, a hashed session ID, latency, model/token metadata, retrieval count, and
-resolver actions, but no raw conversation content. The inspector exposes memory provenance and
-scoring, not prompts or hidden reasoning. Secrets belong in runtime environment variables; `.env`,
-databases, model caches, and build output are ignored.
+logs include request ID, hashed user/session IDs, latency, model/token metadata, retrieval count,
+and resolver actions, but no raw Google subject, email, or conversation content. The inspector
+exposes memory provenance and scoring, not prompts or hidden reasoning. Secrets belong in runtime
+environment variables; `.env`, databases, model caches, and build output are ignored.

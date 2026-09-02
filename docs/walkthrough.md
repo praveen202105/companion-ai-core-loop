@@ -64,5 +64,5 @@ new 52-turn paid run is manual and budgeted rather than part of CI.
 
 Explain why the custom memory engine is primary and Mem0 is deferred. Close by showing the
 implemented production extension: FastAPI/SSE, PostgreSQL/pgvector, Redis rate limits and locks, an
-HttpOnly-cookie Next.js BFF, passcode protection, manual free-tier retention cleanup, and the
-Vercel/Neon/Upstash release runbook.
+Auth.js/Google-protected Next.js BFF, persistent user-scoped conversations, manual legacy-session
+cleanup, and the Vercel/Neon/Upstash release runbook.
