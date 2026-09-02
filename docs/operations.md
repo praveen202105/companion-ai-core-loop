@@ -31,6 +31,7 @@ GROQ_API_KEY=<sealed secret>
 GROQ_BASE_URL=https://api.groq.com/openai/v1
 GROQ_CHAT_MODEL=openai/gpt-oss-120b
 GROQ_EXTRACTION_MODEL=openai/gpt-oss-20b
+GROQ_JUDGE_MODEL=openai/gpt-oss-20b
 LLM_PROVIDER=groq
 EMBEDDING_PROVIDER=multilingual-e5
 INTERNAL_API_KEY=<at least 32 random characters>
@@ -176,6 +177,9 @@ place without a backup and restore rehearsal.
 The provider client retries only transient API failures, at most twice. The application never commits a partial assistant
 message. The UI presents a retryable error; do not loosen database consistency or replay without the
 same `request_id`. Retrieval and readiness remain available because readiness does not call Groq.
+Normal small talk uses one provider call and memory-bearing turns normally use two; investigate any
+sustained increase before raising limits. Never run `eval-live` against production credentials or as
+part of CI.
 
 ### Redis is unavailable
 

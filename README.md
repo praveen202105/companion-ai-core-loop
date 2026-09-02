@@ -18,7 +18,9 @@ The credential-free deterministic suite currently reports:
 | --- | ---: |
 | Persistence accuracy | 100% |
 | Recall@5 | 100% |
+| Precision@1 | 100% |
 | Precision@5 | 20% (one relevant item in five slots) |
+| Mean reciprocal rank | 100% |
 | Factual recall accuracy | 100% |
 | Contradiction resolution accuracy | 100% |
 | Superseded-memory leakage | 0% |
@@ -27,6 +29,12 @@ The credential-free deterministic suite currently reports:
 
 These values come from [the committed report](evals/results/deterministic-v1.json). The suite never
 substitutes a heuristic score for the unavailable subjective judge.
+
+A separate 52-turn Groq diagnostic is committed as an explicitly failing, pre-optimization report:
+[groq-live-v1-failed-preoptimization.json](evals/results/groq-live-v1-failed-preoptimization.json).
+It is failure evidence, not an acceptance claim. It exposed excessive provider calls, stale-context
+selection, predicate aliases, and over-eager persona checking; those code paths now have regression
+tests. A new paid live run is intentionally not triggered automatically.
 
 ## Architecture
 
@@ -51,11 +59,12 @@ flowchart LR
 Every user turn follows a fixed order:
 
 1. Persist the user message.
-2. Extract typed memory candidates.
+2. Apply a local worthiness/privacy gate, then extract typed memory candidates only when needed.
 3. Resolve add, update, supersede, or ignore decisions.
 4. Retrieve active memories through FTS5 and 384-dimensional embeddings.
 5. Generate with Mira's versioned persona, at most six memories, and the last eight messages.
-6. Extract assistant self-claims, repair a persona conflict once, and use a safe fallback if needed.
+6. Check explicit persona facts locally; extract stable assistant self-claims only when relevant,
+   repair a real conflict once, and use a safe fallback if needed.
 7. Persist the assistant response, companion claims, audit events, and retrieval trace.
 
 No endpoint or CLI command exposes hidden chain-of-thought. `explain-last-turn` contains only
@@ -100,6 +109,7 @@ LLM_PROVIDER=groq
 GROQ_API_KEY=your_key_here
 GROQ_CHAT_MODEL=openai/gpt-oss-120b
 GROQ_EXTRACTION_MODEL=openai/gpt-oss-20b
+GROQ_JUDGE_MODEL=openai/gpt-oss-20b
 EMBEDDING_PROVIDER=multilingual-e5
 ```
 
@@ -114,16 +124,33 @@ The existing `LLM_PROVIDER=xai` adapter remains available when an xAI/Grok deplo
 ## CLI
 
 ```bash
-uv run --package companion-ai-api companion chat
-uv run --package companion-ai-api companion chat -m "My name is Praveen"
-uv run --package companion-ai-api companion memory list
-uv run --package companion-ai-api companion memory history
-uv run --package companion-ai-api companion explain-last-turn
-uv run --package companion-ai-api companion reset
+PYTHONPATH=apps/api/src uv run --package companion-ai-api companion chat
+PYTHONPATH=apps/api/src uv run --package companion-ai-api companion chat -m "My name is Praveen"
+PYTHONPATH=apps/api/src uv run --package companion-ai-api companion memory list
+PYTHONPATH=apps/api/src uv run --package companion-ai-api companion memory history
+PYTHONPATH=apps/api/src uv run --package companion-ai-api companion explain-last-turn
+PYTHONPATH=apps/api/src uv run --package companion-ai-api companion reset
 ```
 
 The database survives process restarts. Reset permanently deletes the session, its messages,
 memories, events, and traces through foreign-key cascades.
+
+## Provider-call budget
+
+The online path is deliberately bounded and covered by tests:
+
+- Obvious small talk or a recall question uses one provider call: reply generation.
+- A memory-bearing turn normally uses two: structured extraction and reply generation.
+- State/plan supersession and profile/preference corrections use deterministic transactional rules,
+  so they do not add a contradiction-judge call.
+- A stable companion self-claim may require a persona-check call; one repair call is allowed only
+  when an actual conflict is detected.
+- The subjective judge is offline evaluation tooling and is never called by production chat.
+
+`companion eval-live` is intentionally expensive: a 52-turn suite necessarily generates at least
+52 replies, then performs selective extraction and batched judging. Run it only with an explicit
+evaluation budget; its ignored checkpoint lets a rate-limited run resume without replaying completed
+turns.
 
 ## Web and API
 
@@ -191,8 +218,9 @@ after the `assessment-v1.0.0` tag.
 - `intfloat/multilingual-e5-small` is optional and downloaded separately; tests use a deterministic
   hash embedding with the same 384 dimensions.
 - SQLite vector search is an exact in-process scan suitable for the assessment, not high scale.
-- Subjective tone scoring is pending a separate live judge run and must not be inferred from
-  deterministic assertions.
+- The committed paid-provider report is a failed diagnostic from before the latest fixes. Subjective
+  tone remains unaccepted until a deliberately budgeted live rerun passes; deterministic assertions
+  do not imply a tone score.
 - Account authentication, cross-device identity, mobile clients, custom domains, and billion-user
   scaling are outside this delivery's definition of production readiness.
 

@@ -24,9 +24,9 @@ prints the retrieval trace. Highlight that Pune remains in audit history but can
 Then demonstrate restart persistence manually:
 
 ```bash
-uv run --package companion-ai-api companion chat -m "My name is Praveen"
-uv run --package companion-ai-api companion memory list
-uv run --package companion-ai-api companion chat -m "What is my name?"
+PYTHONPATH=apps/api/src uv run --package companion-ai-api companion chat -m "My name is Praveen"
+PYTHONPATH=apps/api/src uv run --package companion-ai-api companion memory list
+PYTHONPATH=apps/api/src uv run --package companion-ai-api companion chat -m "What is my name?"
 ```
 
 ## 8:00–11:00 — Explain retrieval
@@ -35,7 +35,7 @@ Show the FTS5 and vector candidate paths, Reciprocal Rank Fusion, type-specific 
 cap. Run:
 
 ```bash
-uv run --package companion-ai-api companion explain-last-turn
+PYTHONPATH=apps/api/src uv run --package companion-ai-api companion explain-last-turn
 ```
 
 Emphasize that the output contains auditable score factors—not chain-of-thought—and the full memory
@@ -55,8 +55,10 @@ make eval
 
 Open the committed report. Discuss restart persistence, targeted recall among 24 distractors,
 relationship supersession, preference correction, relocation, and 52 turns of persona pressure.
-Call out the `null` tone score: subjective evaluation is intentionally withheld without a separate
-live judge run.
+Call out Precision@1 and MRR alongside Recall@5; Precision@5 is 20% because each scenario has one
+relevant fact in a five-slot result. The `null` tone score is deliberate. Then open the explicitly
+failed pre-optimization Groq report as failure evidence—never as a passing claim—and explain that a
+new 52-turn paid run is manual and budgeted rather than part of CI.
 
 ## 17:00–20:00 — Tradeoffs and production path
 
