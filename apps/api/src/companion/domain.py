@@ -125,10 +125,20 @@ class SessionView(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: UUID
+    user_id: UUID | None
     persona_version: str
     created_at: datetime
     last_activity_at: datetime
-    expires_at: datetime
+    expires_at: datetime | None
+
+
+class UserView(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    auth_provider: str
+    created_at: datetime
+    last_seen_at: datetime
 
 
 class RetrievalTraceView(BaseModel):

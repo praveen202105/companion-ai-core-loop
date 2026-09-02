@@ -53,15 +53,36 @@ class Base(DeclarativeBase):
     pass
 
 
-class SessionRecord(Base):
-    __tablename__ = "sessions"
+class UserRecord(Base):
+    __tablename__ = "users"
+    __table_args__ = (
+        UniqueConstraint(
+            "auth_provider",
+            "auth_subject",
+            name="uq_user_auth_provider_subject",
+        ),
+    )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_uuid)
+    auth_provider: Mapped[str] = mapped_column(String(32), nullable=False)
+    auth_subject: Mapped[str] = mapped_column(String(255), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+    last_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+
+
+class SessionRecord(Base):
+    __tablename__ = "sessions"
+    __table_args__ = (UniqueConstraint("user_id", name="uq_sessions_user_id"),)
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_uuid)
+    user_id: Mapped[str | None] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), nullable=True, index=True
+    )
     persona_version: Mapped[str] = mapped_column(String(32), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
     last_activity_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
-    expires_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, index=True
+    expires_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True, index=True
     )
 
 

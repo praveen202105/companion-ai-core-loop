@@ -8,6 +8,7 @@ from typing import Any
 from uuid import UUID
 
 from sqlalchemy import delete, func, select, text
+from sqlalchemy.exc import IntegrityError
 
 from companion.domain import (
     MemoryAction,
@@ -19,6 +20,7 @@ from companion.domain import (
     RetrievalTraceView,
     SessionView,
     StoredMemory,
+    UserView,
     utc_now,
 )
 from companion.storage.database import Database
@@ -28,6 +30,7 @@ from companion.storage.models import (
     MessageRecord,
     RetrievalTraceRecord,
     SessionRecord,
+    UserRecord,
 )
 
 
@@ -70,6 +73,112 @@ class SqlAlchemyMemoryStore:
             session.add(record)
         return UUID(record.id)
 
+    def get_or_create_user_session(
+        self,
+        *,
+        auth_provider: str,
+        auth_subject: str,
+        persona_version: str,
+    ) -> tuple[UserView, SessionView]:
+        """Resolve one persistent companion session for an external identity."""
+        for attempt in range(2):
+            try:
+                with self.database.session_factory.begin() as session:
+                    user = session.scalar(
+                        select(UserRecord).where(
+                            UserRecord.auth_provider == auth_provider,
+                            UserRecord.auth_subject == auth_subject,
+                        )
+                    )
+                    now = utc_now()
+                    if user is None:
+                        user = UserRecord(
+                            auth_provider=auth_provider,
+                            auth_subject=auth_subject,
+                            created_at=now,
+                            last_seen_at=now,
+                        )
+                        session.add(user)
+                        session.flush()
+                    else:
+                        user.last_seen_at = now
+
+                    record = session.scalar(
+                        select(SessionRecord).where(SessionRecord.user_id == user.id)
+                    )
+                    if record is None:
+                        record = SessionRecord(
+                            user_id=user.id,
+                            persona_version=persona_version,
+                            created_at=now,
+                            last_activity_at=now,
+                            expires_at=None,
+                        )
+                        session.add(record)
+                        session.flush()
+                    return self._user_view(user), self._session_view(record)
+            except IntegrityError:
+                if attempt == 1:
+                    raise
+        raise RuntimeError("Could not resolve authenticated session")
+
+    def get_user_session(
+        self,
+        *,
+        auth_provider: str,
+        auth_subject: str,
+    ) -> tuple[UserView, SessionView] | None:
+        with self.database.session_factory() as session:
+            user = session.scalar(
+                select(UserRecord).where(
+                    UserRecord.auth_provider == auth_provider,
+                    UserRecord.auth_subject == auth_subject,
+                )
+            )
+            if user is None:
+                return None
+            record = session.scalar(
+                select(SessionRecord).where(SessionRecord.user_id == user.id)
+            )
+            if record is None:
+                return None
+            return self._user_view(user), self._session_view(record)
+
+    def reset_user_session(
+        self,
+        *,
+        auth_provider: str,
+        auth_subject: str,
+        persona_version: str,
+    ) -> tuple[UserView, SessionView]:
+        with self.database.session_factory.begin() as session:
+            user = session.scalar(
+                select(UserRecord).where(
+                    UserRecord.auth_provider == auth_provider,
+                    UserRecord.auth_subject == auth_subject,
+                )
+            )
+            if user is None:
+                raise LookupError("Authenticated user does not exist")
+            current = session.scalar(
+                select(SessionRecord).where(SessionRecord.user_id == user.id)
+            )
+            if current is not None:
+                session.delete(current)
+                session.flush()
+            now = utc_now()
+            record = SessionRecord(
+                user_id=user.id,
+                persona_version=persona_version,
+                created_at=now,
+                last_activity_at=now,
+                expires_at=None,
+            )
+            user.last_seen_at = now
+            session.add(record)
+            session.flush()
+            return self._user_view(user), self._session_view(record)
+
     def session_exists(self, session_id: UUID) -> bool:
         with self.database.session_factory() as session:
             return session.get(SessionRecord, str(session_id)) is not None
@@ -79,13 +188,7 @@ class SqlAlchemyMemoryStore:
             record = session.get(SessionRecord, str(session_id))
             if record is None:
                 return None
-            return SessionView(
-                id=UUID(record.id),
-                persona_version=record.persona_version,
-                created_at=record.created_at,
-                last_activity_at=record.last_activity_at,
-                expires_at=record.expires_at,
-            )
+            return self._session_view(record)
 
     def append_message(
         self,
@@ -522,6 +625,26 @@ class SqlAlchemyMemoryStore:
             )
             session.execute(delete(SessionRecord).where(SessionRecord.expires_at <= threshold))
             return int(expired_count or 0)
+
+    @staticmethod
+    def _session_view(record: SessionRecord) -> SessionView:
+        return SessionView(
+            id=UUID(record.id),
+            user_id=UUID(record.user_id) if record.user_id else None,
+            persona_version=record.persona_version,
+            created_at=record.created_at,
+            last_activity_at=record.last_activity_at,
+            expires_at=record.expires_at,
+        )
+
+    @staticmethod
+    def _user_view(record: UserRecord) -> UserView:
+        return UserView(
+            id=UUID(record.id),
+            auth_provider=record.auth_provider,
+            created_at=record.created_at,
+            last_seen_at=record.last_seen_at,
+        )
 
     def vector_extension_available(self) -> bool:
         if self.database.engine.dialect.name != "postgresql":
