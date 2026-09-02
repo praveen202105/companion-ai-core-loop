@@ -55,6 +55,76 @@ def test_messages_and_memories_survive_reopen(tmp_path: Path) -> None:
     second_db.dispose()
 
 
+def test_authenticated_user_gets_one_persistent_session(
+    store: SqlAlchemyMemoryStore,
+) -> None:
+    first_user, first_session = store.get_or_create_user_session(
+        auth_provider="google",
+        auth_subject="google-user-1",
+        persona_version="1.0.0",
+    )
+    second_user, second_session = store.get_or_create_user_session(
+        auth_provider="google",
+        auth_subject="google-user-1",
+        persona_version="1.0.0",
+    )
+    other_user, other_session = store.get_or_create_user_session(
+        auth_provider="google",
+        auth_subject="google-user-2",
+        persona_version="1.0.0",
+    )
+
+    assert first_user.id == second_user.id
+    assert first_session.id == second_session.id
+    assert first_session.expires_at is None
+    assert first_session.user_id == first_user.id
+    assert other_user.id != first_user.id
+    assert other_session.id != first_session.id
+
+
+def test_reset_only_replaces_authenticated_users_session(
+    store: SqlAlchemyMemoryStore,
+) -> None:
+    _, first = store.get_or_create_user_session(
+        auth_provider="google",
+        auth_subject="google-user-1",
+        persona_version="1.0.0",
+    )
+    _, other = store.get_or_create_user_session(
+        auth_provider="google",
+        auth_subject="google-user-2",
+        persona_version="1.0.0",
+    )
+    store.append_message(session_id=first.id, role=MessageRole.USER, content="private")
+    store.append_message(session_id=other.id, role=MessageRole.USER, content="other")
+
+    _, replacement = store.reset_user_session(
+        auth_provider="google",
+        auth_subject="google-user-1",
+        persona_version="1.0.0",
+    )
+
+    assert replacement.id != first.id
+    assert store.get_session(first.id) is None
+    assert store.list_messages(replacement.id) == []
+    assert store.list_messages(other.id)[0].content == "other"
+
+
+def test_cleanup_keeps_authenticated_sessions(store: SqlAlchemyMemoryStore) -> None:
+    _, authenticated = store.get_or_create_user_session(
+        auth_provider="google",
+        auth_subject="google-user-1",
+        persona_version="1.0.0",
+    )
+    anonymous = store.create_session(persona_version="1.0.0", retention_days=1)
+
+    removed = store.cleanup_expired_sessions(now=utc_now() + timedelta(days=2))
+
+    assert removed == 1
+    assert store.get_session(anonymous) is None
+    assert store.get_session(authenticated.id) is not None
+
+
 def test_message_limit_returns_latest_messages_in_chronological_order(
     store: SqlAlchemyMemoryStore,
 ) -> None:

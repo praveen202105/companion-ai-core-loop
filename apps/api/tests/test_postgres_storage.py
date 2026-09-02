@@ -1,14 +1,17 @@
 import os
+from concurrent.futures import ThreadPoolExecutor
+from threading import Barrier
 from uuid import uuid4
 
 import pytest
+from sqlalchemy import delete
 from sqlalchemy.dialects import postgresql
 
 from companion.config import Settings
 from companion.domain import MemoryCandidate, MemoryType
 from companion.embeddings import HashEmbeddingProvider
 from companion.storage import Database, PostgresMemoryStore
-from companion.storage.models import EmbeddingVector
+from companion.storage.models import EmbeddingVector, UserRecord
 
 
 def test_railway_postgres_url_uses_psycopg3_driver() -> None:
@@ -70,4 +73,38 @@ def test_postgres_pgvector_store_contract() -> None:
         )[0].id == stored.id
     finally:
         store.delete_session(session_id)
+        database.dispose()
+
+
+@pytest.mark.skipif(not os.getenv("TEST_POSTGRES_URL"), reason="PostgreSQL integration URL not set")
+def test_concurrent_first_login_creates_one_user_and_session() -> None:
+    database = Database(os.environ["TEST_POSTGRES_URL"])
+    store = PostgresMemoryStore(database)
+    subject = f"concurrent-{uuid4().hex}"
+    workers = 8
+    barrier = Barrier(workers)
+
+    def resolve_identity(_index: int) -> tuple[str, str]:
+        barrier.wait()
+        user, session = store.get_or_create_user_session(
+            auth_provider="google",
+            auth_subject=subject,
+            persona_version="1.0.0",
+        )
+        return str(user.id), str(session.id)
+
+    try:
+        with ThreadPoolExecutor(max_workers=workers) as executor:
+            identities = list(executor.map(resolve_identity, range(workers)))
+
+        assert len({user_id for user_id, _ in identities}) == 1
+        assert len({session_id for _, session_id in identities}) == 1
+    finally:
+        with database.session_factory.begin() as session:
+            session.execute(
+                delete(UserRecord).where(
+                    UserRecord.auth_provider == "google",
+                    UserRecord.auth_subject == subject,
+                )
+            )
         database.dispose()

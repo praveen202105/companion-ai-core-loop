@@ -30,10 +30,98 @@ def auth() -> dict[str, str]:
     return {"X-Internal-API-Key": "test-internal-key"}
 
 
+def user_auth(subject: str) -> dict[str, str]:
+    return {
+        **auth(),
+        "X-Auth-Provider": "google",
+        "X-Auth-Subject": subject,
+    }
+
+
 async def test_internal_endpoints_require_api_key(api_client: httpx.AsyncClient) -> None:
     response = await api_client.post("/v1/sessions")
 
     assert response.status_code == 401
+
+    missing_user = await api_client.post("/v1/me/session", headers=auth())
+    assert missing_user.status_code == 401
+
+
+async def test_user_scoped_chat_is_persistent_and_isolated(
+    api_client: httpx.AsyncClient,
+) -> None:
+    first = await api_client.post("/v1/me/session", headers=user_auth("google-user-a"))
+    second = await api_client.post("/v1/me/session", headers=user_auth("google-user-b"))
+
+    assert first.status_code == 200
+    assert first.json()["session"]["expires_at"] is None
+    assert first.json()["session"]["id"] != second.json()["session"]["id"]
+
+    chat = await api_client.post(
+        "/v1/me/chat",
+        headers=user_auth("google-user-a"),
+        json={"request_id": "request-user-a-001", "message": "I live in Pune"},
+    )
+    assert chat.status_code == 200
+    assert "event: message.completed" in chat.text
+
+    first_reloaded = await api_client.post(
+        "/v1/me/session",
+        headers=user_auth("google-user-a"),
+    )
+    second_reloaded = await api_client.post(
+        "/v1/me/session",
+        headers=user_auth("google-user-b"),
+    )
+    assert len(first_reloaded.json()["messages"]) == 2
+    assert second_reloaded.json()["messages"] == []
+
+    first_memories = await api_client.get(
+        "/v1/me/memories?status=active",
+        headers=user_auth("google-user-a"),
+    )
+    second_memories = await api_client.get(
+        "/v1/me/memories?status=active",
+        headers=user_auth("google-user-b"),
+    )
+    assert first_memories.json()["memories"][0]["value"] == "Pune"
+    assert second_memories.json()["memories"] == []
+
+    reset = await api_client.post(
+        "/v1/me/session/reset",
+        headers=user_auth("google-user-a"),
+    )
+    after_reset = await api_client.post(
+        "/v1/me/session",
+        headers=user_auth("google-user-a"),
+    )
+    assert reset.status_code == 200
+    assert reset.json()["session"]["id"] != first.json()["session"]["id"]
+    assert after_reset.json()["messages"] == []
+
+
+async def test_anonymous_api_can_be_disabled(tmp_path: Path) -> None:
+    settings = Settings(
+        database_url=f"sqlite:///{tmp_path / 'disabled-anonymous.db'}",
+        internal_api_key="test-internal-key",
+        llm_provider="fake",
+        embedding_provider="hash",
+        enable_anonymous_api=False,
+    )
+    application = create_app(settings)
+    services = build_services(settings)
+    application.state.services = services
+    transport = httpx.ASGITransport(app=application)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+        anonymous = await client.post("/v1/sessions", headers=auth())
+        authenticated = await client.post(
+            "/v1/me/session",
+            headers=user_auth("google-user-a"),
+        )
+    services.database.dispose()
+
+    assert anonymous.status_code == 404
+    assert authenticated.status_code == 200
 
 
 async def test_session_chat_inspection_and_permanent_reset(
