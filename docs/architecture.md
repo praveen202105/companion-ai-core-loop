@@ -59,22 +59,22 @@ session receives a retryable conflict instead of racing the memory transaction.
 ```mermaid
 flowchart LR
     U[Browser] -->|same origin| W[Next.js on Vercel]
-    W -->|INTERNAL_API_KEY| A[FastAPI on Railway]
-    A --> P[(PostgreSQL + pgvector)]
-    A --> R[(Redis)]
+    W -->|INTERNAL_API_KEY| A[FastAPI on Vercel]
+    A --> P[(Neon PostgreSQL + pgvector)]
+    A --> R[(Upstash Redis)]
     A --> X[Groq Responses API]
-    C[Daily cleanup job] --> P
 ```
 
 The browser receives only a signed, Secure, HttpOnly, SameSite=Lax session cookie. Next.js is the
-backend-for-frontend and holds both the Railway URL and internal API key server-side. FastAPI limits
+backend-for-frontend and holds both the API URL and internal API key server-side. FastAPI limits
 messages to 4,000 characters, applies per-IP and per-session limits, serializes turns per session,
 and redacts conversation content from structured logs.
 
-Railway runs the API and cleanup job in Singapore. A pre-deploy Alembic command must succeed before
-a new API deployment is promoted. Readiness checks configuration, PostgreSQL, Redis, and the vector
-extension without spending a Groq request. The daily cleanup command deletes expired session graphs
-through database cascades.
+The free production demo runs both web and API functions in Vercel's Singapore region, with Neon
+PostgreSQL/pgvector and Upstash Redis in Singapore. Alembic is run as an explicit release gate before
+deployment. Readiness checks configuration, PostgreSQL, Redis, and the vector extension without
+spending a Groq request. Expired sessions are removed manually with the cleanup CLI while the free
+topology intentionally has no dedicated cron service.
 
 ## Security and privacy posture
 

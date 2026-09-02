@@ -8,13 +8,14 @@ billion-user capacity. Promote the exact commit that passed CI and staging smoke
 | Component | Platform | Production responsibility |
 | --- | --- | --- |
 | `companion-ai-web` | Vercel, root `apps/web` | UI, passcode gate, signed session cookie, BFF |
-| `companion-api` | Railway Singapore | FastAPI/SSE, memory loop, rate limits, telemetry |
-| `Postgres` | Railway Singapore | PostgreSQL 18 with pinned pgvector image |
-| `Redis` | Railway Singapore | distributed locks and rate limits |
+| `companion-ai-api` | Vercel, root `apps/api` | FastAPI/SSE, memory loop, rate limits, telemetry |
+| `companion-ai-db` | Neon Singapore | PostgreSQL/pgvector persistence and retrieval |
+| `companion-ai-cache` | Upstash Singapore | distributed locks and rate limits |
 
-Railway state is declared in `.railway/railway.ts`. The Docker image preloads
-`intfloat/multilingual-e5-small`, runs as an unprivileged user, and listens on Railway's injected
-`PORT`. Vercel settings live in `apps/web/vercel.json`.
+Vercel settings live in `apps/web/vercel.json` and `apps/api/vercel.json`. The API uses the
+deterministic 384-dimensional hash embedding provider in this serverless free-tier deployment to
+keep the function bundle small. `.railway/railway.ts` remains available as the container-hosted
+alternative when a Railway workspace is unrestricted.
 
 The free-tier topology intentionally omits the scheduled cleanup service. Run the cleanup command
 manually until a cron service is restored; chat, persistence, retrieval, and rate limiting are
@@ -24,7 +25,7 @@ otherwise unchanged.
 
 Never paste secret values into source files, command arguments, CI output, or issue trackers.
 
-Railway `companion-api` variables:
+Vercel `companion-ai-api` server-side variables:
 
 ```text
 APP_ENV=staging|production
@@ -36,7 +37,7 @@ GROQ_CHAT_MODEL=openai/gpt-oss-120b
 GROQ_EXTRACTION_MODEL=openai/gpt-oss-20b
 GROQ_JUDGE_MODEL=openai/gpt-oss-20b
 LLM_PROVIDER=groq
-EMBEDDING_PROVIDER=multilingual-e5
+EMBEDDING_PROVIDER=hash
 INTERNAL_API_KEY=<at least 32 random characters>
 CORS_ORIGINS=["https://the-exact-web-host"]
 SESSION_RETENTION_DAYS=30
@@ -48,7 +49,7 @@ Vercel server-side variables:
 
 ```text
 API_BASE_URL=https://the-environment-api-host
-INTERNAL_API_KEY=<same value as the corresponding Railway environment>
+INTERNAL_API_KEY=<same value as the API project>
 DEMO_PASSCODE_HASH=<scrypt hash>
 COOKIE_SIGNING_SECRET=<at least 32 random characters>
 ```
@@ -78,42 +79,40 @@ and production.
 2. Confirm GitHub Actions is green on the candidate commit. The backend job runs migrations and the
    repository contract suite against ephemeral pgvector/PostgreSQL and Redis services.
 
-3. Link the Railway project and select `staging`. Use a Railway CLI version compatible with the
-   installed `railway/iac` package, then review before applying:
+3. Link both Vercel projects to the same GitHub repository. Set their monorepo roots to `apps/api`
+   and `apps/web`, and select Singapore (`sin1`) in both committed Vercel configurations.
 
    ```bash
-   railway link --project companion-ai
-   railway environment link staging
-   railway config plan
-   railway config apply
+   vercel link --project companion-ai-api --cwd apps/api
+   vercel link --project companion-ai-web --cwd apps/web
    ```
 
-   The plan must contain only the API, Postgres, Redis, their variables, and intended Singapore
-   placement. Stop if it proposes deleting an unrelated resource.
+4. Provision a Neon Free database and Upstash Redis Free resource through the Vercel Marketplace,
+   connect them only to the API project, and disable Upstash automatic paid-plan upgrades.
 
-4. Populate the preserved secrets through Railway's sealed-variable UI or stdin-capable CLI flow.
-   Configure the API's generated Railway domain. Do not deploy a source commit containing secrets.
+5. Populate production secrets through Vercel encrypted environment variables. Do not deploy a
+   source commit containing secrets. Keep the API key and database/cache URLs server-side.
 
-5. The database image includes pgvector binaries, but the extension is database-local. The user
-   must connect to the staging `Postgres` service and run exactly once:
+6. Enable pgvector once in Neon, verify it, and run the migrations before deployment:
 
    ```sql
    CREATE EXTENSION IF NOT EXISTS vector;
    ```
 
-   The implementation must not automate this command. Verify it read-only before deploying:
-
    ```sql
    SELECT extversion FROM pg_extension WHERE extname = 'vector';
    ```
 
-6. Deploy the API. Its pre-deploy command runs `alembic upgrade head`; a non-zero exit prevents the
-   new deployment from replacing the old one. Wait for `/health/ready` to return HTTP 200.
+   ```bash
+   vercel env run -e production --cwd apps/api -- env PYTHONPATH=src uv run alembic upgrade head
+   vercel env run -e production --cwd apps/api -- env PYTHONPATH=src uv run alembic check
+   ```
 
-7. Configure the Vercel Preview variables with the staging API URL and staging secrets, then deploy
-   a preview of `apps/web`.
+7. Deploy the API and wait for `/health/ready` to return HTTP 200.
 
-8. Run the full smoke path:
+8. Configure the web project's `API_BASE_URL` and matching internal key, then deploy `apps/web`.
+
+9. Run the full smoke path:
 
    - `/health/live` and `/health/ready` are 200.
    - Unlock with the staging passcode.
@@ -122,20 +121,19 @@ and production.
    - Correct the fact and confirm the inspector shows an update/supersession without stale leakage.
    - Retry a completed `request_id` and confirm the original result is returned.
    - Reset the chat and confirm messages and memories are gone.
-   - Inspect Railway logs: request IDs and hashed session IDs are present; raw messages are absent.
+   - Inspect Vercel logs: request IDs and hashed session IDs are present; raw messages are absent.
 
 ## Production promotion
 
-Repeat the pgvector one-time command and read-only verification in the production database. Apply
-the production Railway plan, configure production-only secrets, deploy the API, and wait for ready.
-Point Vercel Production variables at the production API, deploy from `main`, and repeat every smoke
-test above. Only then create and push `product-v1.0.0`.
+Repeat the pgvector read-only verification in the production database, run Alembic, deploy the API,
+and wait for readiness. Point the web Production variables at the production API, deploy from
+`main`, and repeat every smoke test above. Only then create and push `product-v1.0.0`.
 
 The supported release order is:
 
 ```text
-CI green → staging data prerequisites → staging migration/deploy → staging smoke
-→ production data prerequisites → production migration/deploy → production smoke → tag
+CI green → production data prerequisites → migration → API deploy/readiness
+→ web deploy → production smoke → tag
 ```
 
 ## Routine operations
@@ -144,14 +142,13 @@ CI green → staging data prerequisites → staging migration/deploy → staging
   and pgvector readiness. Readiness intentionally does not call the model provider.
 - Alert on repeated `chat_failed`, readiness failures, HTTP 5xx, elevated latency, Redis lock
   conflicts, and cleanup failures.
-- Review Railway CPU, memory, HTTP latency, and bounded logs after each release. The local embedding
-  model makes memory usage materially higher than the hash provider used by tests.
-- Until the cron service is restored, periodically run `companion cleanup` from an API shell and
-  confirm the deleted-session count in the logs.
-- Enable Railway database backups before production data is accepted and periodically test restore
-  into a non-production environment.
+- Review Vercel function errors/latency and Neon/Upstash usage after each release.
+- Until a cron service is restored, periodically run `companion cleanup` locally with production
+  environment variables and confirm the deleted-session count.
+- Enable and periodically test the database provider's supported restore workflow before accepting
+  important production data.
 - Rotate the demo passcode and cookie signing secret together when access should be revoked. Rotate
-  `INTERNAL_API_KEY` in Railway and Vercel as one coordinated change.
+  `INTERNAL_API_KEY` in both Vercel projects as one coordinated change.
 
 ## Failure and recovery playbooks
 
@@ -164,17 +161,16 @@ data.
 
 ### API is unhealthy after deploy
 
-Keep the previous healthy deployment serving traffic. Check `/health/ready`, then Railway runtime
-logs for configuration, database, Redis, model-cache, or port errors. Roll back/redeploy the last
-known-good image from Railway's deployment history if the fix is not immediate. Do not roll back the
-database schema unless a tested restore plan exists.
+Keep the previous healthy deployment serving traffic. Check `/health/ready`, then Vercel runtime
+logs for configuration, database, Redis, or provider errors. Roll back to the last known-good Vercel
+deployment if the fix is not immediate. Do not roll back the database schema unless a tested restore
+plan exists.
 
 ### pgvector is missing
 
 Readiness reports `vector_extension=missing`, and migrations using `vector(384)` cannot complete.
-Confirm the service uses the pinned pgvector image, have the user execute the one-time extension
-command, verify `pg_extension` read-only, and redeploy. Never replace an existing database image in
-place without a backup and restore rehearsal.
+Enable the extension in Neon, verify `pg_extension` read-only, and redeploy. Never replace an
+existing database without a backup and restore rehearsal.
 
 ### Groq is unavailable or rate-limited
 
@@ -199,6 +195,6 @@ logs and deployment metadata for investigation; do not copy raw messages into in
 
 ### Cleanup fails
 
-Run `companion cleanup` once against staging to reproduce, inspect the database error, then rerun the
-Railway job after repair. Deletion is transactional and uses foreign-key cascades; do not manually
-delete child tables out of order.
+Run `companion cleanup` once against staging to reproduce and inspect the database error before
+retrying. Deletion is transactional and uses foreign-key cascades; do not manually delete child
+tables out of order.
