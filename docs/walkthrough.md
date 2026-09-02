@@ -55,8 +55,8 @@ make eval
 
 Open the committed report. Discuss restart persistence, targeted recall among 24 distractors,
 relationship supersession, preference correction, relocation, and 52 turns of persona pressure.
-Call out the `null` tone score: subjective evaluation is intentionally withheld without a real Grok
-judge.
+Call out the `null` tone score: subjective evaluation is intentionally withheld without a separate
+live judge run.
 
 ## 17:00–20:00 — Tradeoffs and production path
 

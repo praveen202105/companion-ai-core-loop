@@ -22,7 +22,7 @@ invariants remain identical across adapters. Alembic owns schema evolution in bo
 | Changed current truth or plan | Supersede | Old audit row + linked active replacement |
 | Meaningful historical event | Add | Independent event key based on date and value |
 
-Rules handle deterministic cases. A typed Grok contradiction decision is available for ambiguous
+Rules handle deterministic cases. A typed provider contradiction decision is available for ambiguous
 stable-fact corrections, but its allowed actions are constrained to update, supersede, or ignore.
 
 ## Retrieval
@@ -62,7 +62,7 @@ flowchart LR
     W -->|INTERNAL_API_KEY| A[FastAPI on Railway]
     A --> P[(PostgreSQL + pgvector)]
     A --> R[(Redis)]
-    A --> X[xAI Responses API]
+    A --> X[Groq Responses API]
     C[Daily cleanup job] --> P
 ```
 
@@ -73,7 +73,7 @@ and redacts conversation content from structured logs.
 
 Railway runs the API and cleanup job in Singapore. A pre-deploy Alembic command must succeed before
 a new API deployment is promoted. Readiness checks configuration, PostgreSQL, Redis, and the vector
-extension without spending an xAI request. The daily cleanup command deletes expired session graphs
+extension without spending a Groq request. The daily cleanup command deletes expired session graphs
 through database cascades.
 
 ## Security and privacy posture

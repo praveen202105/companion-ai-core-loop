@@ -3,8 +3,8 @@
 Companion AI Core Loop is a persistence-first companion product built around a fixed persona,
 auditable long-term memory, contradiction resolution, hybrid retrieval, and measurable persona
 consistency. Its assessment core runs locally without paid credentials; its production path adds a
-protected Next.js experience, FastAPI/SSE, PostgreSQL/pgvector, Redis, and Grok through xAI's
-Responses API.
+protected Next.js experience, FastAPI/SSE, PostgreSQL/pgvector, Redis, and replaceable Groq/xAI
+providers through OpenAI-compatible Responses APIs.
 
 The companion is **Mira**: warm, grounded, lightly playful, non-romantic, and able to mirror
 English or natural Hinglish. Her identity is a versioned artifact rather than an improvised system
@@ -23,7 +23,7 @@ The credential-free deterministic suite currently reports:
 | Contradiction resolution accuracy | 100% |
 | Superseded-memory leakage | 0% |
 | Persona contradiction rate over 52 pressure turns | 0% |
-| Subjective tone adherence | Not run—requires a real Grok judge |
+| Subjective tone adherence | Not run—requires a separate live judge run |
 
 These values come from [the committed report](evals/results/deterministic-v1.json). The suite never
 substitutes a heuristic score for the unavailable subjective judge.
@@ -41,8 +41,8 @@ flowchart LR
     Resolve --> Store[(SQLite/FTS5 or PostgreSQL/pgvector)]
     Store --> Retrieve[Lexical + vector retrieval]
     Retrieve --> Prompt[Top 6 memories + last 8 turns + Mira v1]
-    Prompt --> Grok[Grok or deterministic fake]
-    Grok --> Guard[Persona claim checker + one repair]
+    Prompt --> LLM[Groq, xAI, or deterministic fake]
+    LLM --> Guard[Persona claim checker + one repair]
     Guard --> Store
     Store --> Trace[Events and retrieval traces]
     API --> Redis[(Redis limits + session locks)]
@@ -93,19 +93,23 @@ make eval
 `make demo` uses the deterministic provider and an isolated local SQLite database. It demonstrates
 Pune → Bengaluru supersession, recall, and an explainable retrieval trace.
 
-To use Grok, copy `.env.example` to `.env`, keep it untracked, and configure:
+To use GroqCloud, copy `.env.example` to `.env`, keep it untracked, and configure:
 
 ```dotenv
-LLM_PROVIDER=xai
-XAI_API_KEY=your_key_here
-XAI_CHAT_MODEL=grok-4.3
-XAI_EXTRACTION_MODEL=grok-4.3
-XAI_JUDGE_MODEL=grok-4.6
+LLM_PROVIDER=groq
+GROQ_API_KEY=your_key_here
+GROQ_CHAT_MODEL=openai/gpt-oss-120b
+GROQ_EXTRACTION_MODEL=openai/gpt-oss-20b
 EMBEDDING_PROVIDER=multilingual-e5
 ```
 
-The provider uses xAI's OpenAI-compatible Responses API and Pydantic structured outputs. See the
-[xAI structured-output documentation](https://docs.x.ai/developers/model-capabilities/text/structured-outputs).
+The Groq provider uses its OpenAI-compatible Responses API. The 120B production model handles
+conversation, while the faster 20B production model handles Pydantic structured extraction. Both
+support strict JSON-schema outputs. See the
+[Groq Responses API](https://console.groq.com/docs/responses-api) and
+[structured-output documentation](https://console.groq.com/docs/structured-outputs).
+
+The existing `LLM_PROVIDER=xai` adapter remains available when an xAI/Grok deployment is preferred.
 
 ## CLI
 
@@ -175,26 +179,26 @@ after the `assessment-v1.0.0` tag.
   lexical matching; RRF combines both signals without score calibration.
 - **Deleting corrected facts:** rejected because it destroys provenance and makes regressions hard
   to diagnose.
-- **Using an LLM for every conflict:** rejected for deterministic state/location rules. Grok is
-  reserved for genuinely ambiguous contradiction decisions.
+- **Using an LLM for every conflict:** rejected for deterministic state/location rules. The active
+  provider is reserved for genuinely ambiguous contradiction decisions.
 - **Cloud embeddings for the assessment:** rejected to keep local development credential-free and
   to support English/Hinglish without a second paid provider.
 
 ## Known limitations
 
 - The deterministic extractor is deliberately narrow and exists only for credential-free demos.
-  Production extraction uses Grok structured outputs.
+  Production extraction uses strict structured outputs from the configured provider.
 - `intfloat/multilingual-e5-small` is optional and downloaded separately; tests use a deterministic
   hash embedding with the same 384 dimensions.
 - SQLite vector search is an exact in-process scan suitable for the assessment, not high scale.
-- Subjective tone scoring is pending a real `XAI_API_KEY` and must not be inferred from deterministic
-  assertions.
+- Subjective tone scoring is pending a separate live judge run and must not be inferred from
+  deterministic assertions.
 - Account authentication, cross-device identity, mobile clients, custom domains, and billion-user
   scaling are outside this delivery's definition of production readiness.
 
 Production API, PostgreSQL/pgvector, Redis controls, the protected frontend, CI hardening, and
 Vercel/Railway deployment artifacts are implemented after the assessment tag. See the operations
-runbook for the staging-first release and the two external prerequisites: an xAI key and the
+runbook for the staging-first release and the two external prerequisites: a provider key and the
 one-time pgvector extension command.
 
 ## Further reading

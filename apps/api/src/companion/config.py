@@ -21,6 +21,10 @@ class Settings(BaseSettings):
     xai_chat_model: str = "grok-4.3"
     xai_extraction_model: str = "grok-4.3"
     xai_judge_model: str = "grok-4.6"
+    groq_api_key: str | None = None
+    groq_base_url: str = "https://api.groq.com/openai/v1"
+    groq_chat_model: str = "openai/gpt-oss-120b"
+    groq_extraction_model: str = "openai/gpt-oss-20b"
     llm_provider: str = "fake"
     embedding_provider: str = "hash"
     internal_api_key: str = "local-internal-key-change-me"
@@ -47,8 +51,11 @@ class Settings(BaseSettings):
             missing.append("DATABASE_URL must use PostgreSQL")
         if not self.redis_url:
             missing.append("REDIS_URL")
-        if self.llm_provider != "xai" or not self.xai_api_key:
-            missing.append("LLM_PROVIDER=xai and XAI_API_KEY")
+        provider_is_configured = (
+            self.llm_provider == "xai" and bool(self.xai_api_key)
+        ) or (self.llm_provider == "groq" and bool(self.groq_api_key))
+        if not provider_is_configured:
+            missing.append("LLM_PROVIDER with its matching API key")
         if len(self.internal_api_key) < 32 or "change-me" in self.internal_api_key:
             missing.append("a strong INTERNAL_API_KEY")
         if not self.cors_origins or "*" in self.cors_origins:

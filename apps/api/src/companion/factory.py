@@ -19,7 +19,12 @@ from companion.memory import (
 )
 from companion.persona.checker import PersonaConsistencyChecker
 from companion.persona.loader import load_persona
-from companion.providers import FakeLLMProvider, LLMProvider, XAIResponsesProvider
+from companion.providers import (
+    FakeLLMProvider,
+    GroqResponsesProvider,
+    LLMProvider,
+    XAIResponsesProvider,
+)
 from companion.request_control import LocalRequestGuard, RedisRequestGuard, RequestGuard
 from companion.storage import Database, PostgresMemoryStore, SqlAlchemyMemoryStore
 
@@ -51,6 +56,15 @@ def build_services(settings: Settings) -> AppServices:
             base_url=settings.xai_base_url,
             model=settings.xai_chat_model,
             extraction_model=settings.xai_extraction_model,
+        )
+        extractor = MemoryExtractor(provider)
+        judge = LLMContradictionJudge(provider)
+    elif settings.llm_provider == "groq":
+        provider = GroqResponsesProvider(
+            api_key=settings.groq_api_key,
+            base_url=settings.groq_base_url,
+            model=settings.groq_chat_model,
+            extraction_model=settings.groq_extraction_model,
         )
         extractor = MemoryExtractor(provider)
         judge = LLMContradictionJudge(provider)

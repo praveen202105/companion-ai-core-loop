@@ -21,3 +21,17 @@ def test_production_configuration_accepts_required_external_services() -> None:
     )
 
     assert settings.database_url.startswith("postgresql+psycopg://")
+
+
+def test_production_configuration_accepts_groq() -> None:
+    settings = Settings(
+        app_env="production",
+        database_url="postgresql://user:password@db:5432/companion",
+        redis_url="redis://redis:6379/0",
+        llm_provider="groq",
+        groq_api_key="groq-secret",
+        internal_api_key="a" * 40,
+        cors_origins=["https://companion.example"],
+    )
+
+    assert settings.llm_provider == "groq"

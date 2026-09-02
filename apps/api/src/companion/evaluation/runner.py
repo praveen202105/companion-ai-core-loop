@@ -176,7 +176,7 @@ async def run_evaluation(
         scenarios=results,
         failures=failures,
         notes=[
-            "Tone adherence was not scored because XAI_API_KEY was not configured.",
+            "Tone adherence was not scored because deterministic mode does not invoke a judge.",
             "No subjective judge score is inferred or fabricated in deterministic mode.",
         ],
     )

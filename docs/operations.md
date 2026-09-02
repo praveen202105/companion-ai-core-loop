@@ -27,12 +27,11 @@ Railway `companion-api` variables:
 APP_ENV=staging|production
 DATABASE_URL=<reference to Postgres.DATABASE_URL>
 REDIS_URL=<reference to Redis.REDIS_URL>
-XAI_API_KEY=<sealed secret>
-XAI_BASE_URL=https://api.x.ai/v1
-XAI_CHAT_MODEL=grok-4.3
-XAI_EXTRACTION_MODEL=grok-4.3
-XAI_JUDGE_MODEL=grok-4.6
-LLM_PROVIDER=xai
+GROQ_API_KEY=<sealed secret>
+GROQ_BASE_URL=https://api.groq.com/openai/v1
+GROQ_CHAT_MODEL=openai/gpt-oss-120b
+GROQ_EXTRACTION_MODEL=openai/gpt-oss-20b
+LLM_PROVIDER=groq
 EMBEDDING_PROVIDER=multilingual-e5
 INTERNAL_API_KEY=<at least 32 random characters>
 CORS_ORIGINS=["https://the-exact-vercel-host"]
@@ -114,7 +113,7 @@ and production.
 
    - `/health/live` and `/health/ready` are 200.
    - Unlock with the staging passcode.
-   - Send a stable fact and receive a streamed Grok response.
+   - Send a stable fact and receive a streamed Groq response.
    - Reload and confirm message history persists.
    - Correct the fact and confirm the inspector shows an update/supersession without stale leakage.
    - Retry a completed `request_id` and confirm the original result is returned.
@@ -138,7 +137,7 @@ CI green → staging data prerequisites → staging migration/deploy → staging
 ## Routine operations
 
 - Inspect `/health/live` for process health and `/health/ready` for database, Redis, configuration,
-  and pgvector readiness. Readiness intentionally does not call xAI.
+  and pgvector readiness. Readiness intentionally does not call the model provider.
 - Alert on repeated `chat_failed`, readiness failures, HTTP 5xx, elevated latency, Redis lock
   conflicts, and cleanup failures.
 - Review Railway CPU, memory, HTTP latency, and bounded logs after each release. The local embedding
@@ -172,11 +171,11 @@ Confirm the service uses the pinned pgvector image, have the user execute the on
 command, verify `pg_extension` read-only, and redeploy. Never replace an existing database image in
 place without a backup and restore rehearsal.
 
-### xAI is unavailable or rate-limited
+### Groq is unavailable or rate-limited
 
-The API retries only xAI 429/5xx failures, at most twice. It never commits a partial assistant
+The provider client retries only transient API failures, at most twice. The application never commits a partial assistant
 message. The UI presents a retryable error; do not loosen database consistency or replay without the
-same `request_id`. Retrieval and readiness remain available because readiness does not call xAI.
+same `request_id`. Retrieval and readiness remain available because readiness does not call Groq.
 
 ### Redis is unavailable
 
@@ -186,7 +185,7 @@ then resume traffic.
 
 ### Suspected data or secret exposure
 
-Disable the public demo, rotate the passcode, cookie secret, internal API key, and xAI key, then
+Disable the public demo, rotate the passcode, cookie secret, internal API key, and Groq key, then
 invalidate affected sessions by deleting them or applying the retention cleanup. Preserve redacted
 logs and deployment metadata for investigation; do not copy raw messages into incident channels.
 

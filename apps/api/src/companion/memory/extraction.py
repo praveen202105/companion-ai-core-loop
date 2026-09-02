@@ -51,7 +51,7 @@ class CandidateExtractor(Protocol):
 
 
 class DeterministicMemoryExtractor:
-    """Small credential-free extractor for local demos; production uses Grok."""
+    """Small credential-free extractor for local demos; production uses structured output."""
 
     _patterns: tuple[tuple[re.Pattern[str], MemoryType, str, float], ...] = (
         (
