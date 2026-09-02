@@ -67,6 +67,7 @@ class ChatEngine:
             raise ValueError("Message cannot be empty")
         if len(message) > 4_000:
             raise ValueError("Message cannot exceed 4,000 characters")
+        usage_before = self.provider.usage_snapshot()
 
         existing_user = (
             self.store.get_message_by_request(session_id, request_id) if request_id else None
@@ -123,6 +124,7 @@ class ChatEngine:
             guard = await self.persona_checker.guard(
                 session_id=session_id,
                 draft=response,
+                user_message=message,
             )
             response = guard.response
             companion_claims = guard.claims
@@ -134,8 +136,8 @@ class ChatEngine:
             reply_to_request_id=request_id,
             model=str(usage.get("model", usage.get("provider", "unknown"))),
             prompt_version=CHAT_PROMPT_VERSION,
-            input_tokens=self._optional_int(usage.get("input_tokens")),
-            output_tokens=self._optional_int(usage.get("output_tokens")),
+            input_tokens=self._usage_delta(usage_before, usage, "input_tokens"),
+            output_tokens=self._usage_delta(usage_before, usage, "output_tokens"),
         )
         for claim in companion_claims:
             try:
@@ -175,3 +177,16 @@ class ChatEngine:
     @staticmethod
     def _optional_int(value: object) -> int | None:
         return int(value) if isinstance(value, int | float) else None
+
+    @classmethod
+    def _usage_delta(
+        cls,
+        before: dict[str, object],
+        after: dict[str, object],
+        key: str,
+    ) -> int | None:
+        current = cls._optional_int(after.get(key))
+        if current is None:
+            return None
+        previous = cls._optional_int(before.get(key)) or 0
+        return max(0, current - previous)

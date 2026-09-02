@@ -14,6 +14,7 @@ from companion.memory import (
     MemoryResolver,
     Retriever,
 )
+from companion.persona.checker import PersonaConsistencyChecker
 from companion.persona.loader import load_persona
 from companion.providers.fake import FakeLLMProvider
 from companion.storage import SqlAlchemyMemoryStore
@@ -46,6 +47,28 @@ def engine(
         retriever=Retriever(store, embeddings),
         embedding_provider=embeddings,
         persona=load_persona(),
+    )
+
+
+def guarded_engine(
+    store: SqlAlchemyMemoryStore,
+    provider: FakeLLMProvider,
+) -> ChatEngine:
+    embeddings = HashEmbeddingProvider()
+    persona = load_persona()
+    return ChatEngine(
+        store=store,
+        provider=provider,
+        extractor=MemoryExtractor(provider),
+        resolver=MemoryResolver(store),
+        retriever=Retriever(store, embeddings),
+        embedding_provider=embeddings,
+        persona=persona,
+        persona_checker=PersonaConsistencyChecker(
+            provider=provider,
+            persona=persona,
+            store=store,
+        ),
     )
 
 
@@ -115,3 +138,27 @@ async def test_retry_resumes_after_user_message_was_already_persisted(
 
     assert result.response == "Recovered response"
     assert len(store.list_messages(session_id)) == 2
+
+
+async def test_small_talk_uses_one_generation_call(
+    store: SqlAlchemyMemoryStore,
+) -> None:
+    provider = FakeLLMProvider("That sounds like a pleasantly quiet evening.")
+    chat = guarded_engine(store, provider)
+    session_id = store.create_session(persona_version="1.0.0")
+
+    await chat.turn(session_id=session_id, message="The evening is quiet today.")
+
+    assert provider.usage_snapshot()["calls"] == 1
+
+
+async def test_memory_worthy_turn_uses_at_most_two_calls(
+    store: SqlAlchemyMemoryStore,
+) -> None:
+    provider = FakeLLMProvider()
+    chat = guarded_engine(store, provider)
+    session_id = store.create_session(persona_version="1.0.0")
+
+    await chat.turn(session_id=session_id, message="I live in Pune.")
+
+    assert provider.usage_snapshot()["calls"] == 2

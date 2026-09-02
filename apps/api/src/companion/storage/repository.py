@@ -127,15 +127,18 @@ class SqlAlchemyMemoryStore:
             return self._message_view(record)
 
     def list_messages(self, session_id: UUID, *, limit: int | None = None) -> list[MessageView]:
-        statement = (
-            select(MessageRecord)
-            .where(MessageRecord.session_id == str(session_id))
-            .order_by(MessageRecord.sequence_no.asc())
+        statement = select(MessageRecord).where(
+            MessageRecord.session_id == str(session_id)
         )
         if limit is not None:
-            statement = statement.limit(limit)
+            statement = statement.order_by(MessageRecord.sequence_no.desc()).limit(limit)
+        else:
+            statement = statement.order_by(MessageRecord.sequence_no.asc())
         with self.database.session_factory() as session:
-            return [self._message_view(row) for row in session.scalars(statement).all()]
+            rows = list(session.scalars(statement).all())
+            if limit is not None:
+                rows.reverse()
+            return [self._message_view(row) for row in rows]
 
     def get_message_by_request(self, session_id: UUID, request_id: str) -> MessageView | None:
         with self.database.session_factory() as session:

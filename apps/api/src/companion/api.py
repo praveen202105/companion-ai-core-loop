@@ -311,6 +311,8 @@ def register_routes(application: FastAPI) -> None:
         settings = get_api_settings(request)
         if settings.llm_provider == "xai" and not settings.xai_api_key:
             checks["configuration"] = "missing_xai_api_key"
+        elif settings.llm_provider == "groq" and not settings.groq_api_key:
+            checks["configuration"] = "missing_groq_api_key"
         else:
             checks["configuration"] = "ok"
         ready_status = "ok" if all(value == "ok" for value in checks.values()) else "not_ready"

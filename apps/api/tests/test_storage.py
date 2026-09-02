@@ -55,6 +55,24 @@ def test_messages_and_memories_survive_reopen(tmp_path: Path) -> None:
     second_db.dispose()
 
 
+def test_message_limit_returns_latest_messages_in_chronological_order(
+    store: SqlAlchemyMemoryStore,
+) -> None:
+    session_id = store.create_session(persona_version="1.0.0")
+    for index in range(12):
+        store.append_message(
+            session_id=session_id,
+            role=MessageRole.USER,
+            content=f"message {index}",
+        )
+
+    messages = store.list_messages(session_id, limit=8)
+
+    assert [item.content for item in messages] == [
+        f"message {index}" for index in range(4, 12)
+    ]
+
+
 def test_only_one_active_canonical_memory_is_allowed(store: SqlAlchemyMemoryStore) -> None:
     session_id = store.create_session(persona_version="1.0.0")
     store.add_memory(session_id=session_id, candidate=candidate())

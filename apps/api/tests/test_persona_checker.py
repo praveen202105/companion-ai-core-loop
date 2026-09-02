@@ -117,3 +117,55 @@ async def test_chat_persists_consistent_companion_claim(
         if memory.owner == MemoryOwner.COMPANION
     ]
     assert companion_memories[0].value == "Bengaluru"
+
+
+async def test_checker_repairs_direct_persona_answer_using_user_context(
+    store: SqlAlchemyMemoryStore,
+) -> None:
+    provider = SequencedClaimsProvider(
+        [DraftClaims(claims=[]), DraftClaims(claims=[])],
+        repair="I currently live in Bengaluru.",
+    )
+    checker = PersonaConsistencyChecker(
+        provider=provider,
+        persona=load_persona(),
+        store=store,
+    )
+    session_id = store.create_session(persona_version="1.0.0")
+
+    result = await checker.guard(
+        session_id=session_id,
+        user_message="Where do you currently live, Mira?",
+        draft="Pune.",
+    )
+
+    assert result.response == "I currently live in Bengaluru."
+    assert result.repaired
+    assert not result.fallback_used
+
+
+async def test_checker_does_not_accept_negated_canonical_value(
+    store: SqlAlchemyMemoryStore,
+) -> None:
+    provider = SequencedClaimsProvider(
+        [
+            DraftClaims(claims=[city_claim("not Bengaluru; Mumbai")]),
+            DraftClaims(claims=[city_claim("Bengaluru")]),
+        ],
+        repair="I currently live in Bengaluru.",
+    )
+    checker = PersonaConsistencyChecker(
+        provider=provider,
+        persona=load_persona(),
+        store=store,
+    )
+    session_id = store.create_session(persona_version="1.0.0")
+
+    result = await checker.guard(
+        session_id=session_id,
+        user_message="Where do you currently live, Mira?",
+        draft="I do not live in Bengaluru; I live in Mumbai.",
+    )
+
+    assert result.response == "I currently live in Bengaluru."
+    assert result.repaired

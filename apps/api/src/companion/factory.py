@@ -12,7 +12,6 @@ from companion.embeddings import (
 from companion.memory import (
     CandidateExtractor,
     DeterministicMemoryExtractor,
-    LLMContradictionJudge,
     MemoryExtractor,
     MemoryResolver,
     Retriever,
@@ -58,7 +57,6 @@ def build_services(settings: Settings) -> AppServices:
             extraction_model=settings.xai_extraction_model,
         )
         extractor = MemoryExtractor(provider)
-        judge = LLMContradictionJudge(provider)
     elif settings.llm_provider == "groq":
         provider = GroqResponsesProvider(
             api_key=settings.groq_api_key,
@@ -67,11 +65,9 @@ def build_services(settings: Settings) -> AppServices:
             extraction_model=settings.groq_extraction_model,
         )
         extractor = MemoryExtractor(provider)
-        judge = LLMContradictionJudge(provider)
     elif settings.llm_provider == "fake":
         provider = FakeLLMProvider()
         extractor = DeterministicMemoryExtractor()
-        judge = None
     else:
         raise ValueError(f"Unsupported LLM_PROVIDER: {settings.llm_provider}")
 
@@ -83,7 +79,10 @@ def build_services(settings: Settings) -> AppServices:
     else:
         raise ValueError(f"Unsupported EMBEDDING_PROVIDER: {settings.embedding_provider}")
 
-    resolver = MemoryResolver(store, contradiction_judge=judge)
+    # State/plan supersession and profile/preference correction are deterministic.
+    # The optional LLM judge remains available for explicitly ambiguous workflows,
+    # but the normal chat path avoids a third paid call for contradiction handling.
+    resolver = MemoryResolver(store)
     retriever = Retriever(store, embedding_provider)
     persona_checker = PersonaConsistencyChecker(
         provider=provider,
